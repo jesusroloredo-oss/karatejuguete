@@ -173,7 +173,7 @@
     <div class="header">
         <div>
             <h1>Panel de Tatamis</h1>
-            <p>Última actualización: <span id="last-update">Nunca</span> <span id="loader">(Buscando datos, puede tardar un poco...)</span></p>
+            <p>Última actualización: <span id="last-update">Nunca</span> <span id="loader">(Buscando categorías activas...)</span></p>
             <p id="error-msg">Aviso: El proxy está saturado. Se mantendrán los datos anteriores.</p>
         </div>
         <button class="btn-refresh" onclick="actualizarDatos()">Refrescar Ahora</button>
@@ -215,7 +215,6 @@
 
         async function fetchHTML(url) {
             const finalUrl = PROXY_URL + encodeURIComponent(url);
-            
             const response = await fetch(finalUrl);
             if (!response.ok) throw new Error('Error HTTP: ' + response.status);
             
@@ -260,60 +259,75 @@
 
         async function obtenerEnlacesIniciados() {
             try {
-                const doc = await fetchHTML(BASE_URL + "index.php?accion=sorteos");
+                const doc = await fetchHTML(BASE_URL + "index.php?accion=sorteos"); // O access.php según tu versión
                 let enlaces = [];
                 const filas = doc.querySelectorAll("tr");
 
                 for (let row of filas) {
                     const tds = row.querySelectorAll("td");
-                    
-                    // CORRECCIÓN: Quitamos el filtro estricto de .fondoNaranja.
-                    // Ahora cogemos cualquier fila que tenga el botón de los brackets.
-                    if (tds.length >= 3) {
-                        const button = tds[2].querySelector("button[onclick]");
-                        if (button) {
-                            const match = button.getAttribute("onclick").match(/darValor\('idCompeticion',\s*(\d+)\)/);
+                    if (tds.length < 3) continue;
+
+                    // 1. ELIMINAMOS LAS FINALIZADAS: Si alguna celda dice exactamente "Finalizada", saltamos esta fila.
+                    const isFinalizada = Array.from(tds).some(td => td.textContent.trim().toUpperCase() === "FINALIZADA");
+                    if (isFinalizada) continue;
+
+                    // 2. Extraer el ID de la competición (Busca la clase directa o inspecciona los botones)
+                    let idComp = null;
+                    const idElement = row.querySelector(".casillaIdCompeticion");
+                    if (idElement) {
+                        idComp = idElement.textContent.trim();
+                    } else {
+                        // Respaldo por si cambia el diseño: buscar en los botones
+                        const btns = row.querySelectorAll("button[onclick]");
+                        for (let btn of btns) {
+                            const match = btn.getAttribute("onclick").match(/darValor\('idCompeticion',\s*(\d+)\)/);
                             if (match) {
-                                const idComp = match[1];
-                                const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
-                                
-                                let horaInicio = "-";
-                                for (let td of tds) {
-                                    const dateMatch = td.textContent.trim().match(/\d{4}-\d{2}-\d{2}\s+(\d{2}:\d{2})/);
-                                    if (dateMatch) {
-                                        horaInicio = dateMatch[1];
-                                        break;
-                                    }
-                                }
+                                idComp = match[1];
+                                break;
+                            }
+                        }
+                    }
 
-                                try {
-                                    await sleep(500); 
-                                    const docComp = await fetchHTML(urlBase);
-                                    const poolElements = docComp.querySelectorAll(".rotuloGrupo");
-                                    let numPools = 0;
-                                    
-                                    if (poolElements.length > 0) {
-                                        const textoPool = poolElements[0].textContent.trim();
-                                        const matchPool = textoPool.match(/\/\s*(\d+)/);
-                                        if (matchPool) {
-                                            numPools = parseInt(matchPool[1]);
-                                        }
-                                    }
+                    if (idComp) {
+                        const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
+                        
+                        // Extraer la hora
+                        let horaInicio = "-";
+                        for (let td of tds) {
+                            const dateMatch = td.textContent.trim().match(/\d{4}-\d{2}-\d{2}\s+(\d{2}:\d{2})/);
+                            if (dateMatch) {
+                                horaInicio = dateMatch[1];
+                                break;
+                            }
+                        }
 
-                                    if (numPools > 1) {
-                                        for (let idx = 1; idx <= numPools; idx++) {
-                                            enlaces.push({
-                                                url: `${urlBase}&verPool=${idx}&poolMostrada=1`,
-                                                hora: horaInicio
-                                            });
-                                        }
-                                    } else {
-                                        enlaces.push({ url: urlBase, hora: horaInicio });
-                                    }
-                                } catch (e) {
-                                    enlaces.push({ url: urlBase, hora: horaInicio });
+                        // Explorar las Pools si no está finalizada
+                        try {
+                            await sleep(300); 
+                            const docComp = await fetchHTML(urlBase);
+                            const poolElements = docComp.querySelectorAll(".rotuloGrupo");
+                            let numPools = 0;
+                            
+                            if (poolElements.length > 0) {
+                                const textoPool = poolElements[0].textContent.trim();
+                                const matchPool = textoPool.match(/\/\s*(\d+)/);
+                                if (matchPool) {
+                                    numPools = parseInt(matchPool[1]);
                                 }
                             }
+
+                            if (numPools > 1) {
+                                for (let idx = 1; idx <= numPools; idx++) {
+                                    enlaces.push({
+                                        url: `${urlBase}&verPool=${idx}&poolMostrada=1`,
+                                        hora: horaInicio
+                                    });
+                                }
+                            } else {
+                                enlaces.push({ url: urlBase, hora: horaInicio });
+                            }
+                        } catch (e) {
+                            enlaces.push({ url: urlBase, hora: horaInicio });
                         }
                     }
                 }
@@ -325,7 +339,7 @@
 
         async function verificarPuntuacionesYTitulo(url) {
             try {
-                await sleep(500);
+                await sleep(300);
                 const doc = await fetchHTML(url);
                 const tituloElement = doc.querySelector("h3");
                 let titulo = tituloElement ? tituloElement.textContent.replace(/\s+/g, ' ').trim() : "Desconocido";
@@ -499,7 +513,11 @@
             
             const tatamis = Object.keys(stats).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
             
-            if (tatamis.length === 0) return;
+            // Si ya no queda nada de nada
+            if (tatamis.length === 0) {
+                document.getElementById("dashboard").style.display = "none";
+                return;
+            }
             
             document.getElementById("dashboard").style.display = "block";
             
@@ -521,7 +539,7 @@
                 div.innerHTML = `
                     <div class="tatami-stat-header">
                         <span>${nombreLimpio} <span class="tatami-stat-info">(${data.activas} ${textoCategorias} activa/s)</span></span>
-                        <span>${data.pendientes} encuentros</span>
+                        <span>${data.pendientes} encuentros pendientes</span>
                     </div>
                     <div class="tatami-bar-bg">
                         <div class="tatami-bar-fill" style="width: ${porcentaje}%;"></div>
@@ -543,7 +561,6 @@
 
             try {
                 const nuevosTatamis = await obtenerTatamis();
-                
                 if (Object.keys(nuevosTatamis).length === 0) {
                     throw new Error("Proxy bloqueó la petición de Tatamis.");
                 } else {
@@ -633,7 +650,7 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             actualizarDatos();
-            setInterval(actualizarDatos, 150000); 
+            setInterval(actualizarDatos, 120000); // 2 minutos
         });
     </script>
 </body>
