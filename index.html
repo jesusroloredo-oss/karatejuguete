@@ -125,7 +125,7 @@
     </table>
 
     <script>
-        const BASE_URL = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
+      const BASE_URL = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
         // Usamos AllOrigins como proxy CORS para poder leer el HTML desde GitHub Pages
         const PROXY_URL = "https://api.allorigins.win/get?url="; 
         
@@ -149,7 +149,14 @@
                 
                 h4s.forEach(h4 => {
                     const tatamiNombre = h4.textContent.trim();
-                    const divHermano = h4.nextElementSibling;
+                    
+                    // Emulamos el "find_next_sibling('div')" de Python
+                    // Saltamos elementos hasta encontrar un <div>
+                    let divHermano = h4.nextElementSibling;
+                    while (divHermano && divHermano.tagName.toLowerCase() !== 'div') {
+                        divHermano = divHermano.nextElementSibling;
+                    }
+                    
                     if (!divHermano) return;
                     
                     const tabla = divHermano.querySelector("table");
@@ -159,7 +166,9 @@
                     filas.forEach(fila => {
                         const celdas = fila.querySelectorAll("td");
                         if (celdas.length >= 2) {
-                            dic[celdas[1].textContent.trim()] = tatamiNombre;
+                            // Limpiamos espacios dobles o saltos de línea ocultos
+                            const nombreCat = celdas[1].textContent.replace(/\s+/g, ' ').trim();
+                            dic[nombreCat] = tatamiNombre;
                         }
                     });
                 });
@@ -185,8 +194,6 @@
                             if (match) {
                                 const idComp = match[1];
                                 const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
-                                // Nota: la lógica profunda de sub-pools requeriría hacer fetch de esta URLBase primero.
-                                // Para no saturar el proxy, guardamos la base inicial.
                                 enlaces.push(urlBase);
                             }
                         }
@@ -203,7 +210,9 @@
             try {
                 const doc = await fetchHTML(url);
                 const tituloElement = doc.querySelector("h3");
-                let titulo = tituloElement ? tituloElement.textContent.trim() : "Desconocido";
+                
+                // Limpiamos también el título base de la misma manera que el diccionario
+                let titulo = tituloElement ? tituloElement.textContent.replace(/\s+/g, ' ').trim() : "Desconocido";
 
                 const liguillas = Array.from(doc.querySelectorAll(".cajaEncuentroLiguilla"));
                 const eliminatorias = Array.from(doc.querySelectorAll(".cajaEncuentroEliminatorias"));
@@ -231,7 +240,6 @@
                     const rondas = Array.from(poolContainer.querySelectorAll(".cajaRondaEliminatorias"));
                     
                     if (rondas.length > 0) {
-                        // Descartar combates vacíos de primera ronda
                         const combatesCol1 = rondas[0].querySelectorAll(".cajaEncuentroEliminatorias");
                         combatesCol1.forEach(combate => {
                             const competidores = combate.querySelectorAll(".textoBlancoNombreCompetidor");
@@ -275,35 +283,34 @@
         async function actualizarDatos() {
             document.getElementById('loader').style.display = 'inline';
             const tbody = document.querySelector("#data-table tbody");
-            tbody.innerHTML = ""; // Limpiar tabla
+            tbody.innerHTML = ""; 
 
-            if (Object.keys(tatamiDict).length === 0) {
-                tatamiDict = await obtenerTatamis();
-            }
+            // Forzamos cargar el diccionario cada vez por si cambian tatamis a mitad de mañana
+            tatamiDict = await obtenerTatamis();
 
             const enlaces = await obtenerEnlacesIniciados();
 
             for (let url of enlaces) {
                 const { titulo, estado, pendientes } = await verificarPuntuacionesYTitulo(url);
-                const nombreBase = titulo.includes(' (') ? titulo.split(' (')[0] : titulo;
+                
+                // Extraemos el nombre base limpiando espacios y partiendo por el paréntesis de Liguilla/Pool
+                const nombreBase = titulo.includes(' (') ? titulo.split(' (')[0].trim() : titulo.trim();
+                
+                // Buscamos en el diccionario
                 const tatami = tatamiDict[nombreBase] || "Desconocido";
                 
                 const tr = document.createElement("tr");
 
-                // Columna Visto
                 const tdVisto = document.createElement("td");
                 const isVisto = vistos[url] || false;
                 tdVisto.innerHTML = `<button class="btn-visto ${isVisto ? 'visto' : ''}" onclick="toggleVisto('${url}', this)">${isVisto ? '✔ Visto' : 'Marcar'}</button>`;
                 
-                // Columna Tatami
                 const tdTatami = document.createElement("td");
                 tdTatami.textContent = tatami;
 
-                // Columna Categoría
                 const tdCat = document.createElement("td");
                 tdCat.textContent = titulo;
 
-                // Columna Estado
                 const tdEstado = document.createElement("td");
                 if (estado === null) {
                     tdEstado.textContent = "-";
@@ -311,11 +318,9 @@
                     tdEstado.innerHTML = estado ? '<span class="status-ok">OK</span>' : '<span class="status-error">X</span>';
                 }
 
-                // Columna Pendientes
                 const tdPendientes = document.createElement("td");
                 tdPendientes.textContent = pendientes;
 
-                // Columna Enlace
                 const tdEnlace = document.createElement("td");
                 tdEnlace.innerHTML = `<a href="${url}" target="_blank">Abrir ↗</a>`;
 
@@ -331,7 +336,6 @@
         // Cargar al iniciar
         document.addEventListener('DOMContentLoaded', () => {
             actualizarDatos();
-            // Refresco automático cada 60 segundos (puedes ajustarlo)
             setInterval(actualizarDatos, 60000);
         });
     </script>
