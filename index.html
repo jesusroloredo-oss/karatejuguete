@@ -85,6 +85,7 @@
             padding: 5px 10px;
             border-radius: 4px;
             cursor: pointer;
+            white-space: nowrap;
         }
 
         .btn-visto.visto {
@@ -124,10 +125,11 @@
         <thead>
             <tr>
                 <th onclick="sortTable(0)">Visto <span class="sort-icon"></span></th>
-                <th onclick="sortTable(1)">Tatami <span class="sort-icon"></span></th>
-                <th onclick="sortTable(2)">Categoría <span class="sort-icon"></span></th>
-                <th onclick="sortTable(3)">Estado <span class="sort-icon"></span></th>
-                <th onclick="sortTable(4)">Pendientes <span class="sort-icon"></span></th>
+                <th onclick="sortTable(1)">Hora <span class="sort-icon"></span></th>
+                <th onclick="sortTable(2)">Tatami <span class="sort-icon"></span></th>
+                <th onclick="sortTable(3)">Categoría <span class="sort-icon"></span></th>
+                <th onclick="sortTable(4)">Estado <span class="sort-icon"></span></th>
+                <th onclick="sortTable(5)">Pendientes <span class="sort-icon"></span></th>
                 <th>Enlace</th>
             </tr>
         </thead>
@@ -203,6 +205,13 @@
                                 const idComp = match[1];
                                 const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
                                 
+                                // EXTRAER LA HORA DE LA FILA (Formato esperado: YYYY-MM-DD HH:MM:SS)
+                                let horaInicio = "-";
+                                const dateMatch = row.textContent.match(/\d{4}-\d{2}-\d{2} (\d{2}:\d{2})(:\d{2})?/);
+                                if (dateMatch) {
+                                    horaInicio = dateMatch[1]; // Cogemos solo el "HH:MM"
+                                }
+
                                 try {
                                     const docComp = await fetchHTML(urlBase);
                                     const poolElements = docComp.querySelectorAll(".rotuloGrupo");
@@ -218,14 +227,17 @@
 
                                     if (numPools > 1) {
                                         for (let idx = 1; idx <= numPools; idx++) {
-                                            enlaces.push(`${urlBase}&verPool=${idx}&poolMostrada=1`);
+                                            enlaces.push({
+                                                url: `${urlBase}&verPool=${idx}&poolMostrada=1`,
+                                                hora: horaInicio
+                                            });
                                         }
                                     } else {
-                                        enlaces.push(urlBase);
+                                        enlaces.push({ url: urlBase, hora: horaInicio });
                                     }
                                 } catch (e) {
                                     console.error("Error revisando pools:", e);
-                                    enlaces.push(urlBase);
+                                    enlaces.push({ url: urlBase, hora: horaInicio });
                                 }
                             }
                         }
@@ -309,10 +321,8 @@
         function buscarTatamiParaCategoria(tituloCompleto) {
             const tituloMayus = tituloCompleto.toUpperCase();
             
-            // 1. Coincidencia exacta
             if (tatamiDict[tituloMayus]) return tatamiDict[tituloMayus];
 
-            // 2. Extraer el nombre base y el número de pool
             let nombreBase = tituloCompleto;
             if (tituloCompleto.includes(' (')) {
                 nombreBase = tituloCompleto.split(' (')[0].trim();
@@ -322,7 +332,6 @@
             const matchPool = tituloCompleto.match(/POOL\s*(\d+)/i);
             const poolNum = matchPool ? matchPool[1] : null;
 
-            // 3. Encontrar TODOS los tatamis que tengan una categoría con el mismo nombre base
             let posiblesClaves = Object.keys(tatamiDict).filter(key => 
                 key.includes(nombreBaseMayus) || nombreBaseMayus.includes(key)
             );
@@ -335,7 +344,6 @@
                 });
             }
 
-            // 4. Filtrar buscando el número de Pool exacto
             if (posiblesClaves.length > 0) {
                 if (poolNum) {
                     const regexPool = new RegExp(`\\b(?:POOL|P|G|GRUPO)\\s*-?\\s*0*${poolNum}\\b|\\b0*${poolNum}\\s*/|\\(0*${poolNum}\\)`, 'i');
@@ -396,14 +404,17 @@
                 let valB = b.cells[columnIndex].textContent.trim();
 
                 if (columnIndex === 0) { 
+                    // Columna Visto
                     valA = a.cells[0].querySelector('button').classList.contains('visto') ? 1 : 0;
                     valB = b.cells[0].querySelector('button').classList.contains('visto') ? 1 : 0;
                     return sortAsc ? valA - valB : valB - valA;
-                } else if (columnIndex === 4) { 
+                } else if (columnIndex === 5) { 
+                    // Columna Pendientes (Índice desplazado a 5 por la nueva columna Hora)
                     valA = parseInt(valA) || 0;
                     valB = parseInt(valB) || 0;
                     return sortAsc ? valA - valB : valB - valA;
                 } else { 
+                    // Resto de columnas de texto (incluida Hora en formato HH:MM que se ordena perfectamente como texto)
                     const cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
                     return sortAsc ? cmp : -cmp;
                 }
@@ -419,24 +430,35 @@
                 tbody.innerHTML = ""; 
 
                 tatamiDict = await obtenerTatamis();
-                const enlaces = await obtenerEnlacesIniciados();
+                const enlacesItems = await obtenerEnlacesIniciados();
 
-                for (let url of enlaces) {
+                for (let item of enlacesItems) {
+                    const url = item.url;
+                    const horaInicio = item.hora;
+                    
                     const { titulo, estado, pendientes } = await verificarPuntuacionesYTitulo(url);
                     const tatami = buscarTatamiParaCategoria(titulo);
                     
                     const tr = document.createElement("tr");
 
+                    // 0. Columna Visto
                     const tdVisto = document.createElement("td");
                     const isVisto = vistos[url] || false;
                     tdVisto.innerHTML = `<button class="btn-visto ${isVisto ? 'visto' : ''}" onclick="toggleVisto('${url}', this)">${isVisto ? '✔ Visto' : 'Marcar'}</button>`;
                     
+                    // 1. Columna Hora
+                    const tdHora = document.createElement("td");
+                    tdHora.textContent = horaInicio;
+
+                    // 2. Columna Tatami
                     const tdTatami = document.createElement("td");
                     tdTatami.textContent = tatami;
 
+                    // 3. Columna Categoría
                     const tdCat = document.createElement("td");
                     tdCat.textContent = titulo;
 
+                    // 4. Columna Estado
                     const tdEstado = document.createElement("td");
                     if (estado === null) {
                         tdEstado.textContent = "-";
@@ -444,13 +466,15 @@
                         tdEstado.innerHTML = estado ? '<span class="status-ok">OK</span>' : '<span class="status-error">X</span>';
                     }
 
+                    // 5. Columna Pendientes
                     const tdPendientes = document.createElement("td");
                     tdPendientes.textContent = pendientes;
 
+                    // 6. Columna Enlace
                     const tdEnlace = document.createElement("td");
                     tdEnlace.innerHTML = `<a href="${url}" target="_blank">Abrir ↗</a>`;
 
-                    tr.append(tdVisto, tdTatami, tdCat, tdEstado, tdPendientes, tdEnlace);
+                    tr.append(tdVisto, tdHora, tdTatami, tdCat, tdEstado, tdPendientes, tdEnlace);
                     tbody.appendChild(tr);
                 }
 
