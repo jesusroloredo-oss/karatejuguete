@@ -124,7 +124,7 @@
         <div>
             <h1>Panel de Tatamis</h1>
             <p>Última actualización: <span id="last-update">Nunca</span> <span id="loader">(Buscando datos...)</span></p>
-            <p id="error-msg">Error de conexión: El proxy ha fallado. Reintentando en breve...</p>
+            <p id="error-msg">Aviso: Ha habido un error leyendo alguna categoría.</p>
         </div>
         <button class="btn-refresh" onclick="actualizarDatos()">Refrescar Ahora</button>
     </div>
@@ -148,25 +148,28 @@
 
     <script>
         const BASE_URL = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
-        // Cambiamos a 'raw' para que devuelva el HTML directo sin fallos de JSON
-        const PROXY_URL = "https://api.allorigins.win/raw?url="; 
+        // VOLVEMOS AL PROXY JSON QUE SÍ TE FUNCIONABA
+        const PROXY_URL = "https://api.allorigins.win/get?url="; 
         
         let tatamiDict = {};
         let vistos = JSON.parse(localStorage.getItem('combates_vistos') || '{}');
         let sortCol = -1;
         let sortAsc = true;
-        let isFetching = false; // Evita que se solapen dos actualizaciones
+        let isFetching = false;
+
+        // Función para dar un respiro al proxy y que no nos bloquee (300 milisegundos)
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
 
         async function fetchHTML(url) {
-            // Añadimos un anti-caché para que AllOrigins no nos bloquee ni repita datos viejos
             const separador = url.includes('?') ? '&' : '?';
             const finalUrl = `${url}${separador}t=${Date.now()}`;
             
             const response = await fetch(PROXY_URL + encodeURIComponent(finalUrl));
             if (!response.ok) throw new Error('Error en la red');
-            const text = await response.text();
+            
+            const data = await response.json();
             const parser = new DOMParser();
-            return parser.parseFromString(text, "text/html");
+            return parser.parseFromString(data.contents, "text/html");
         }
 
         async function obtenerTatamis() {
@@ -199,7 +202,7 @@
                 return dic;
             } catch (error) {
                 console.error("Error obteniendo tatamis:", error);
-                return tatamiDict; // Si falla, conservamos el diccionario anterior
+                return tatamiDict;
             }
         }
 
@@ -219,15 +222,19 @@
                                 const idComp = match[1];
                                 const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
                                 
-                                // EXTRAER LA HORA DE LA FILA (Formato: YYYY-MM-DD HH:MM:SS)
+                                // EXTRACCIÓN DE LA HORA (CELDA POR CELDA)
                                 let horaInicio = "-";
-                                const textContentRow = row.textContent.replace(/\s+/g, ' '); // Limpiamos saltos de línea
-                                const dateMatch = textContentRow.match(/\d{4}-\d{2}-\d{2}\s(\d{2}:\d{2})/);
-                                if (dateMatch) {
-                                    horaInicio = dateMatch[1];
+                                for (let td of tds) {
+                                    // Busca "YYYY-MM-DD HH:MM", da igual los espacios que haya
+                                    const dateMatch = td.textContent.trim().match(/\d{4}-\d{2}-\d{2}\s+(\d{2}:\d{2})/);
+                                    if (dateMatch) {
+                                        horaInicio = dateMatch[1]; // Nos quedamos solo con la hora
+                                        break;
+                                    }
                                 }
 
                                 try {
+                                    await sleep(300); // Pausa para no saturar al proxy
                                     const docComp = await fetchHTML(urlBase);
                                     const poolElements = docComp.querySelectorAll(".rotuloGrupo");
                                     let numPools = 0;
@@ -261,12 +268,13 @@
                 return enlaces;
             } catch (error) {
                 console.error("Error obteniendo enlaces principales:", error);
-                throw error; // Lanza el error para que actualizarDatos lo cace
+                throw error; 
             }
         }
 
         async function verificarPuntuacionesYTitulo(url) {
             try {
+                await sleep(300); // Pausa antes de comprobar la puntuación
                 const doc = await fetchHTML(url);
                 const tituloElement = doc.querySelector("h3");
                 let titulo = tituloElement ? tituloElement.textContent.replace(/\s+/g, ' ').trim() : "Desconocido";
@@ -332,8 +340,9 @@
         }
 
         function buscarTatamiParaCategoria(tituloCompleto) {
+            if (tituloCompleto === "Error de carga") return "Desconocido";
+
             const tituloMayus = tituloCompleto.toUpperCase();
-            
             if (tatamiDict[tituloMayus]) return tatamiDict[tituloMayus];
 
             let nombreBase = tituloCompleto;
@@ -439,17 +448,14 @@
             
             document.getElementById('loader').style.display = 'inline';
             document.getElementById('error-msg').style.display = 'none';
+            let hubErrores = false;
 
             try {
-                // Solo si tatamiDict está vacío lo pedimos
                 if (Object.keys(tatamiDict).length === 0) {
                     tatamiDict = await obtenerTatamis();
                 }
 
                 const enlacesItems = await obtenerEnlacesIniciados();
-                
-                // Creamos un "DocumentFragment". Esto guarda las filas en memoria y no borra
-                // tu tabla actual hasta que todo esté cargado, evitando la pantalla en blanco.
                 const fragment = document.createDocumentFragment();
 
                 for (let item of enlacesItems) {
@@ -457,6 +463,8 @@
                     const horaInicio = item.hora;
                     
                     const { titulo, estado, pendientes } = await verificarPuntuacionesYTitulo(url);
+                    if (titulo === "Error de carga") hubErrores = true;
+                    
                     const tatami = buscarTatamiParaCategoria(titulo);
                     
                     const tr = document.createElement("tr");
@@ -491,13 +499,16 @@
                     fragment.appendChild(tr);
                 }
 
-                // Ahora sí, sustituimos la tabla antigua por la nueva de golpe
                 const tbody = document.querySelector("#data-table tbody");
                 tbody.innerHTML = "";
                 tbody.appendChild(fragment);
 
                 const now = new Date();
                 document.getElementById('last-update').textContent = now.toLocaleTimeString();
+                
+                if (hubErrores) {
+                    document.getElementById('error-msg').style.display = 'block';
+                }
                 
                 if (sortCol !== -1) {
                     sortAsc = !sortAsc; 
@@ -515,7 +526,8 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             actualizarDatos();
-            setInterval(actualizarDatos, 60000);
+            // Lo bajamos a refrescar cada 2 minutos para no agotar el proxy gratis tan rápido
+            setInterval(actualizarDatos, 120000); 
         });
     </script>
 </body>
