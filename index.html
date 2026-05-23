@@ -3,213 +3,337 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Monitor de Tatamis - FGK</title>
+    <title>Monitor de Competición</title>
     <style>
         :root {
-            --bg-color: #f4f6f9;
-            --card-bg: #ffffff;
-            --text-main: #333333;
-            --accent: #004b87; /* Azul tipo federación */
-            --success: #2e7d32;
-            --warning: #f57c00;
-            --pending: #757575;
+            --bg-color: #1e1e1e;
+            --text-color: #f0f0f0;
+            --accent-color: #007acc;
+            --row-bg: #2d2d2d;
+            --row-alt: #252525;
+            --ok-color: #4CAF50;
+            --error-color: #F44336;
         }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: var(--bg-color);
-            color: var(--text-main);
+            color: var(--text-color);
             margin: 0;
             padding: 20px;
         }
-        .container { max-width: 900px; margin: 0 auto; }
-        .summary-card {
-            background: var(--accent);
-            color: white;
-            padding: 20px;
-            border-radius: 12px;
-            text-align: center;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 15px;
-        }
-        .tatami-card {
-            background: var(--card-bg);
-            padding: 15px;
-            border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-            border-top: 5px solid var(--accent);
-        }
-        .tatami-title { font-size: 1.3rem; font-weight: bold; margin-top: 0; }
-        .category-list { list-style: none; padding: 0; margin: 10px 0 0 0; font-size: 0.9rem;}
-        .category-item { 
-            padding: 6px 0; 
-            border-bottom: 1px solid #eee; 
-            display: flex; 
+
+        .header {
+            display: flex;
             justify-content: space-between;
             align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid var(--accent-color);
+            padding-bottom: 10px;
         }
-        .category-item:last-child { border-bottom: none; }
-        .badge {
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 0.75rem;
-            font-weight: bold;
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #444;
+        }
+
+        th {
+            background-color: var(--accent-color);
             color: white;
+            position: sticky;
+            top: 0;
         }
-        .bg-finalizada { background-color: var(--success); }
-        .bg-iniciada { background-color: var(--warning); }
-        .bg-sin-comenzar { background-color: var(--pending); }
-        .stats { margin-bottom: 10px; font-weight: bold; color: var(--accent); }
+
+        tr:nth-child(even) { background-color: var(--row-alt); }
+        tr:nth-child(odd) { background-color: var(--row-bg); }
+
+        .btn-refresh {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .btn-refresh:hover { background-color: #005f9e; }
+        
+        .btn-visto {
+            background-color: transparent;
+            border: 1px solid #888;
+            color: #888;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .btn-visto.visto {
+            background-color: var(--ok-color);
+            color: white;
+            border-color: var(--ok-color);
+        }
+
+        a {
+            color: #61afef;
+            text-decoration: none;
+        }
+        
+        a:hover { text-decoration: underline; }
+
+        .status-ok { color: var(--ok-color); font-weight: bold; }
+        .status-error { color: var(--error-color); font-weight: bold; }
+        
+        #loader {
+            display: none;
+            font-style: italic;
+            color: #aaa;
+        }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="summary-card">
-        <h2>Monitor Karate Scoring</h2>
-        <p>FGK Liga Galega 2026 J3</p>
-        <div style="font-size: 1.5rem; font-weight: bold;" id="estado">Iniciando escaneo...</div>
+    <div class="header">
+        <div>
+            <h1>Panel de Tatamis</h1>
+            <p>Última actualización: <span id="last-update">Nunca</span> <span id="loader">(Actualizando...)</span></p>
+        </div>
+        <button class="btn-refresh" onclick="actualizarDatos()">Refrescar Ahora</button>
     </div>
 
-    <div class="grid" id="tatamis-container">
-        </div>
-</div>
+    <table id="data-table">
+        <thead>
+            <tr>
+                <th>Visto</th>
+                <th>Tatami</th>
+                <th>Categoría</th>
+                <th>Estado</th>
+                <th>Pendientes</th>
+                <th>Enlace</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Los datos se insertarán aquí con JS -->
+        </tbody>
+    </table>
 
-<script>
-    // Utilidades de limpieza de texto para cruzar las tablas
-    function normalizar(texto) {
-        return texto.replace(/[\n\r]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-    }
-
-    async function cargarDatos() {
-        try {
-            document.getElementById('estado').innerText = "Cargando datos en tiempo real...";
-            
-            const proxy = "https://api.allorigins.win/get?url=";
-            // URLs origen
-            const urlTatamis = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/index.php?accion=tatamis";
-            const urlSorteos = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/index.php?accion=sorteos";
-
-            // 1. Descargamos ambas páginas en paralelo
-            const [resTatamis, resSorteos] = await Promise.all([
-                fetch(proxy + encodeURIComponent(urlTatamis)),
-                fetch(proxy + encodeURIComponent(urlSorteos))
-            ]);
-
-            const dataTatamis = await resTatamis.json();
-            const dataSorteos = await resSorteos.json();
-
-            const parser = new DOMParser();
-            const docTatamis = parser.parseFromString(dataTatamis.contents, "text/html");
-            const docSorteos = parser.parseFromString(dataSorteos.contents, "text/html");
-
-            // 2. Extraer el estado general de las categorías (Finalizada, Iniciada, Sin comenzar)
-            const estados = {};
-            const filasSorteos = docSorteos.querySelectorAll('tr');
-            filasSorteos.forEach(tr => {
-                if(tr.cells.length >= 2) {
-                    let nombreCat = normalizar(tr.cells[0].innerText);
-                    let estado = tr.cells[1].innerText.trim();
-                    if(['Sin comenzar', 'Iniciada', 'Finalizada'].includes(estado)) {
-                        estados[nombreCat] = estado;
-                    }
-                }
-            });
-
-            // 3. Cruzar los tatamis con las categorías
-            const tatamis = [];
-            const headers = docTatamis.querySelectorAll('h4');
-            
-            headers.forEach(h4 => {
-                if(h4.innerText.toLowerCase().includes('tatami')) {
-                    const tatamiObj = {
-                        nombre: h4.innerText.trim(),
-                        categorias: []
-                    };
-                    
-                    let node = h4.nextElementSibling;
-                    while(node && node.tagName !== 'H4') {
-                        if(node.tagName === 'TABLE') {
-                            const filas = node.querySelectorAll('tr');
-                            filas.forEach((tr, index) => {
-                                if(index > 0 && tr.cells.length >= 2) { // Evita cabeceras
-                                    let catOriginal = tr.cells[1].innerText.trim().replace(/\n/g, '').replace(/  +/g, ' ');
-                                    let catNorm = normalizar(catOriginal);
-                                    
-                                    // Buscar coincidencia de estado
-                                    let estadoFinal = 'Sin comenzar'; 
-                                    for (const [key, val] of Object.entries(estados)) {
-                                        if (catNorm.includes(key) || key.includes(catNorm)) {
-                                            estadoFinal = val; break;
-                                        }
-                                    }
-
-                                    tatamiObj.categorias.push({ nombre: catOriginal, estado: estadoFinal });
-                                }
-                            });
-                        }
-                        node = node.nextElementSibling;
-                    }
-                    if(tatamiObj.categorias.length > 0) tatamis.push(tatamiObj);
-                }
-            });
-
-            renderizar(tatamis);
-
-        } catch (error) {
-            document.getElementById('estado').innerText = "Error de conexión. Reintentando en breve...";
-            console.error(error);
-        }
-    }
-
-    function renderizar(tatamis) {
-        const container = document.getElementById('tatamis-container');
-        container.innerHTML = ''; // Limpiar
+    <script>
+        const BASE_URL = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
+        // Usamos AllOrigins como proxy CORS para poder leer el HTML desde GitHub Pages
+        const PROXY_URL = "https://api.allorigins.win/get?url="; 
         
-        let totalFaltan = 0;
+        let tatamiDict = {};
+        let vistos = JSON.parse(localStorage.getItem('combates_vistos') || '{}');
 
-        tatamis.forEach(t => {
-            const faltan = t.categorias.filter(c => c.estado !== 'Finalizada').length;
-            totalFaltan += faltan;
+        // Función auxiliar para hacer fetch a través del proxy y parsear el HTML
+        async function fetchHTML(url) {
+            const response = await fetch(PROXY_URL + encodeURIComponent(url));
+            if (!response.ok) throw new Error('Error en la red');
+            const data = await response.json();
+            const parser = new DOMParser();
+            return parser.parseFromString(data.contents, "text/html");
+        }
 
-            let htmlCategorias = t.categorias.map(c => {
-                let badgeClass = 'bg-sin-comenzar';
-                if(c.estado === 'Finalizada') badgeClass = 'bg-finalizada';
-                if(c.estado === 'Iniciada') badgeClass = 'bg-iniciada';
+        async function obtenerTatamis() {
+            try {
+                const doc = await fetchHTML(BASE_URL + "index.php?accion=tatamis");
+                let dic = {};
+                const h4s = doc.querySelectorAll("h4");
                 
-                return `
-                    <li class="category-item">
-                        <span>${c.nombre}</span>
-                        <span class="badge ${badgeClass}">${c.estado}</span>
-                    </li>`;
-            }).join('');
+                h4s.forEach(h4 => {
+                    const tatamiNombre = h4.textContent.trim();
+                    const divHermano = h4.nextElementSibling;
+                    if (!divHermano) return;
+                    
+                    const tabla = divHermano.querySelector("table");
+                    if (!tabla) return;
+                    
+                    const filas = tabla.querySelectorAll("tr");
+                    filas.forEach(fila => {
+                        const celdas = fila.querySelectorAll("td");
+                        if (celdas.length >= 2) {
+                            dic[celdas[1].textContent.trim()] = tatamiNombre;
+                        }
+                    });
+                });
+                return dic;
+            } catch (error) {
+                console.error("Error obteniendo tatamis:", error);
+                return {};
+            }
+        }
 
-            const card = document.createElement('div');
-            card.className = 'tatami-card';
-            card.innerHTML = `
-                <h3 class="tatami-title">${t.nombre}</h3>
-                <div class="stats">Quedan ${faltan} categorías</div>
-                <ul class="category-list">
-                    ${htmlCategorias}
-                </ul>
-            `;
-            container.appendChild(card);
+        async function obtenerEnlacesIniciados() {
+            try {
+                const doc = await fetchHTML(BASE_URL + "index.php?accion=sorteos");
+                let enlaces = [];
+                const filas = doc.querySelectorAll("tr");
+
+                for (let row of filas) {
+                    const tds = row.querySelectorAll("td");
+                    if (tds.length >= 3 && tds[1].querySelector(".fondoNaranja")) {
+                        const button = tds[2].querySelector("button[onclick]");
+                        if (button) {
+                            const match = button.getAttribute("onclick").match(/darValor\('idCompeticion',\s*(\d+)\)/);
+                            if (match) {
+                                const idComp = match[1];
+                                const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
+                                // Nota: la lógica profunda de sub-pools requeriría hacer fetch de esta URLBase primero.
+                                // Para no saturar el proxy, guardamos la base inicial.
+                                enlaces.push(urlBase);
+                            }
+                        }
+                    }
+                }
+                return enlaces;
+            } catch (error) {
+                console.error("Error obteniendo enlaces:", error);
+                return [];
+            }
+        }
+
+        async function verificarPuntuacionesYTitulo(url) {
+            try {
+                const doc = await fetchHTML(url);
+                const tituloElement = doc.querySelector("h3");
+                let titulo = tituloElement ? tituloElement.textContent.trim() : "Desconocido";
+
+                const liguillas = Array.from(doc.querySelectorAll(".cajaEncuentroLiguilla"));
+                const eliminatorias = Array.from(doc.querySelectorAll(".cajaEncuentroEliminatorias"));
+                const combates = [...liguillas, ...eliminatorias];
+
+                let combatesRestantes = 0;
+                combates.forEach(combate => {
+                    const puntos = Array.from(combate.querySelectorAll(".cajaPuntos"));
+                    const tienePuntos = puntos.some(p => p.textContent.trim() !== "");
+                    if (!tienePuntos) {
+                        combatesRestantes++;
+                    }
+                });
+
+                let todosValidos = false;
+
+                if (liguillas.length > 0) {
+                    titulo += " (Liguilla)";
+                    return { titulo, estado: null, pendientes: combatesRestantes };
+                }
+
+                // Lógica de Eliminatorias
+                const poolContainer = doc.querySelector(".cajaPoolEliminatorias");
+                if (poolContainer) {
+                    const rondas = Array.from(poolContainer.querySelectorAll(".cajaRondaEliminatorias"));
+                    
+                    if (rondas.length > 0) {
+                        // Descartar combates vacíos de primera ronda
+                        const combatesCol1 = rondas[0].querySelectorAll(".cajaEncuentroEliminatorias");
+                        combatesCol1.forEach(combate => {
+                            const competidores = combate.querySelectorAll(".textoBlancoNombreCompetidor");
+                            if (competidores.length === 1) {
+                                const puntos = Array.from(combate.querySelectorAll(".cajaPuntos"));
+                                if (!puntos.some(p => p.textContent.trim() !== "")) {
+                                    combatesRestantes--;
+                                }
+                            }
+                        });
+                    }
+
+                    if (rondas.length >= 2) {
+                        const penultima = rondas[rondas.length - 2];
+                        const puntos = Array.from(penultima.querySelectorAll(".cajaPuntos"));
+                        todosValidos = puntos.length > 0 && puntos.every(p => p.textContent.trim() !== "");
+                    }
+                }
+
+                return { titulo, estado: todosValidos, pendientes: Math.max(0, combatesRestantes) };
+
+            } catch (error) {
+                console.error("Error verificando url:", url);
+                return { titulo: "Error de carga", estado: false, pendientes: 0 };
+            }
+        }
+
+        function toggleVisto(url, btnElement) {
+            vistos[url] = !vistos[url];
+            localStorage.setItem('combates_vistos', JSON.stringify(vistos));
+            
+            if (vistos[url]) {
+                btnElement.classList.add('visto');
+                btnElement.textContent = "✔ Visto";
+            } else {
+                btnElement.classList.remove('visto');
+                btnElement.textContent = "Marcar";
+            }
+        }
+
+        async function actualizarDatos() {
+            document.getElementById('loader').style.display = 'inline';
+            const tbody = document.querySelector("#data-table tbody");
+            tbody.innerHTML = ""; // Limpiar tabla
+
+            if (Object.keys(tatamiDict).length === 0) {
+                tatamiDict = await obtenerTatamis();
+            }
+
+            const enlaces = await obtenerEnlacesIniciados();
+
+            for (let url of enlaces) {
+                const { titulo, estado, pendientes } = await verificarPuntuacionesYTitulo(url);
+                const nombreBase = titulo.includes(' (') ? titulo.split(' (')[0] : titulo;
+                const tatami = tatamiDict[nombreBase] || "Desconocido";
+                
+                const tr = document.createElement("tr");
+
+                // Columna Visto
+                const tdVisto = document.createElement("td");
+                const isVisto = vistos[url] || false;
+                tdVisto.innerHTML = `<button class="btn-visto ${isVisto ? 'visto' : ''}" onclick="toggleVisto('${url}', this)">${isVisto ? '✔ Visto' : 'Marcar'}</button>`;
+                
+                // Columna Tatami
+                const tdTatami = document.createElement("td");
+                tdTatami.textContent = tatami;
+
+                // Columna Categoría
+                const tdCat = document.createElement("td");
+                tdCat.textContent = titulo;
+
+                // Columna Estado
+                const tdEstado = document.createElement("td");
+                if (estado === null) {
+                    tdEstado.textContent = "-";
+                } else {
+                    tdEstado.innerHTML = estado ? '<span class="status-ok">OK</span>' : '<span class="status-error">X</span>';
+                }
+
+                // Columna Pendientes
+                const tdPendientes = document.createElement("td");
+                tdPendientes.textContent = pendientes;
+
+                // Columna Enlace
+                const tdEnlace = document.createElement("td");
+                tdEnlace.innerHTML = `<a href="${url}" target="_blank">Abrir ↗</a>`;
+
+                tr.append(tdVisto, tdTatami, tdCat, tdEstado, tdPendientes, tdEnlace);
+                tbody.appendChild(tr);
+            }
+
+            const now = new Date();
+            document.getElementById('last-update').textContent = now.toLocaleTimeString();
+            document.getElementById('loader').style.display = 'none';
+        }
+
+        // Cargar al iniciar
+        document.addEventListener('DOMContentLoaded', () => {
+            actualizarDatos();
+            // Refresco automático cada 60 segundos (puedes ajustarlo)
+            setInterval(actualizarDatos, 60000);
         });
-
-        const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-        document.getElementById('estado').innerText = `Quedan ${totalFaltan} categorías en total (Act. ${hora})`;
-    }
-
-    // Ejecutar al cargar la página
-    cargarDatos();
-    
-    // Actualizar cada 2 minutos (120.000 milisegundos) automáticamente
-    setInterval(cargarDatos, 120000);
-
-</script>
+    </script>
 </body>
 </html>
