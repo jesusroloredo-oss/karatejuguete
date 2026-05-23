@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor de Tatamis - FGK</title>
+    <style>
+        :root {
+            --bg-color: #f4f6f9;
+            --card-bg: #ffffff;
+            --text-main: #333333;
+            --accent: #004b87; /* Azul tipo federación */
+            --success: #2e7d32;
+            --warning: #f57c00;
+            --pending: #757575;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        .summary-card {
+            background: var(--accent);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 15px;
+        }
+        .tatami-card {
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            border-top: 5px solid var(--accent);
+        }
+        .tatami-title { font-size: 1.3rem; font-weight: bold; margin-top: 0; }
+        .category-list { list-style: none; padding: 0; margin: 10px 0 0 0; font-size: 0.9rem;}
+        .category-item { 
+            padding: 6px 0; 
+            border-bottom: 1px solid #eee; 
+            display: flex; 
+            justify-content: space-between;
+            align-items: center;
+        }
+        .category-item:last-child { border-bottom: none; }
+        .badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: white;
+        }
+        .bg-finalizada { background-color: var(--success); }
+        .bg-iniciada { background-color: var(--warning); }
+        .bg-sin-comenzar { background-color: var(--pending); }
+        .stats { margin-bottom: 10px; font-weight: bold; color: var(--accent); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="summary-card">
+        <h2>Monitor Karate Scoring</h2>
+        <p>FGK Liga Galega 2026 J3</p>
+        <div style="font-size: 1.5rem; font-weight: bold;" id="estado">Iniciando escaneo...</div>
+    </div>
+
+    <div class="grid" id="tatamis-container">
+        </div>
+</div>
+
+<script>
+    // Utilidades de limpieza de texto para cruzar las tablas
+    function normalizar(texto) {
+        return texto.replace(/[\n\r]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    async function cargarDatos() {
+        try {
+            document.getElementById('estado').innerText = "Cargando datos en tiempo real...";
+            
+            const proxy = "https://api.allorigins.win/get?url=";
+            // URLs origen
+            const urlTatamis = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/index.php?accion=tatamis";
+            const urlSorteos = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/index.php?accion=sorteos";
+
+            // 1. Descargamos ambas páginas en paralelo
+            const [resTatamis, resSorteos] = await Promise.all([
+                fetch(proxy + encodeURIComponent(urlTatamis)),
+                fetch(proxy + encodeURIComponent(urlSorteos))
+            ]);
+
+            const dataTatamis = await resTatamis.json();
+            const dataSorteos = await resSorteos.json();
+
+            const parser = new DOMParser();
+            const docTatamis = parser.parseFromString(dataTatamis.contents, "text/html");
+            const docSorteos = parser.parseFromString(dataSorteos.contents, "text/html");
+
+            // 2. Extraer el estado general de las categorías (Finalizada, Iniciada, Sin comenzar)
+            const estados = {};
+            const filasSorteos = docSorteos.querySelectorAll('tr');
+            filasSorteos.forEach(tr => {
+                if(tr.cells.length >= 2) {
+                    let nombreCat = normalizar(tr.cells[0].innerText);
+                    let estado = tr.cells[1].innerText.trim();
+                    if(['Sin comenzar', 'Iniciada', 'Finalizada'].includes(estado)) {
+                        estados[nombreCat] = estado;
+                    }
+                }
+            });
+
+            // 3. Cruzar los tatamis con las categorías
+            const tatamis = [];
+            const headers = docTatamis.querySelectorAll('h4');
+            
+            headers.forEach(h4 => {
+                if(h4.innerText.toLowerCase().includes('tatami')) {
+                    const tatamiObj = {
+                        nombre: h4.innerText.trim(),
+                        categorias: []
+                    };
+                    
+                    let node = h4.nextElementSibling;
+                    while(node && node.tagName !== 'H4') {
+                        if(node.tagName === 'TABLE') {
+                            const filas = node.querySelectorAll('tr');
+                            filas.forEach((tr, index) => {
+                                if(index > 0 && tr.cells.length >= 2) { // Evita cabeceras
+                                    let catOriginal = tr.cells[1].innerText.trim().replace(/\n/g, '').replace(/  +/g, ' ');
+                                    let catNorm = normalizar(catOriginal);
+                                    
+                                    // Buscar coincidencia de estado
+                                    let estadoFinal = 'Sin comenzar'; 
+                                    for (const [key, val] of Object.entries(estados)) {
+                                        if (catNorm.includes(key) || key.includes(catNorm)) {
+                                            estadoFinal = val; break;
+                                        }
+                                    }
+
+                                    tatamiObj.categorias.push({ nombre: catOriginal, estado: estadoFinal });
+                                }
+                            });
+                        }
+                        node = node.nextElementSibling;
+                    }
+                    if(tatamiObj.categorias.length > 0) tatamis.push(tatamiObj);
+                }
+            });
+
+            renderizar(tatamis);
+
+        } catch (error) {
+            document.getElementById('estado').innerText = "Error de conexión. Reintentando en breve...";
+            console.error(error);
+        }
+    }
+
+    function renderizar(tatamis) {
+        const container = document.getElementById('tatamis-container');
+        container.innerHTML = ''; // Limpiar
+        
+        let totalFaltan = 0;
+
+        tatamis.forEach(t => {
+            const faltan = t.categorias.filter(c => c.estado !== 'Finalizada').length;
+            totalFaltan += faltan;
+
+            let htmlCategorias = t.categorias.map(c => {
+                let badgeClass = 'bg-sin-comenzar';
+                if(c.estado === 'Finalizada') badgeClass = 'bg-finalizada';
+                if(c.estado === 'Iniciada') badgeClass = 'bg-iniciada';
+                
+                return `
+                    <li class="category-item">
+                        <span>${c.nombre}</span>
+                        <span class="badge ${badgeClass}">${c.estado}</span>
+                    </li>`;
+            }).join('');
+
+            const card = document.createElement('div');
+            card.className = 'tatami-card';
+            card.innerHTML = `
+                <h3 class="tatami-title">${t.nombre}</h3>
+                <div class="stats">Quedan ${faltan} categorías</div>
+                <ul class="category-list">
+                    ${htmlCategorias}
+                </ul>
+            `;
+            container.appendChild(card);
+        });
+
+        const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        document.getElementById('estado').innerText = `Quedan ${totalFaltan} categorías en total (Act. ${hora})`;
+    }
+
+    // Ejecutar al cargar la página
+    cargarDatos();
+    
+    // Actualizar cada 2 minutos (120.000 milisegundos) automáticamente
+    setInterval(cargarDatos, 120000);
+
+</script>
+</body>
+</html>
