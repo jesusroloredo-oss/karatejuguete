@@ -175,7 +175,6 @@
                     filas.forEach(fila => {
                         const celdas = fila.querySelectorAll("td");
                         if (celdas.length >= 2) {
-                            // Guardamos todo en MAYÚSCULAS para cruzar datos sin error
                             const nombreCat = celdas[1].textContent.replace(/\s+/g, ' ').trim().toUpperCase();
                             dic[nombreCat] = tatamiNombre;
                         }
@@ -204,7 +203,6 @@
                                 const idComp = match[1];
                                 const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
                                 
-                                // Entramos a la URL para comprobar si está dividida en Pools
                                 try {
                                     const docComp = await fetchHTML(urlBase);
                                     const poolElements = docComp.querySelectorAll(".rotuloGrupo");
@@ -286,11 +284,10 @@
                     if (rondas.length >= 2) {
                         let penultima = rondas[rondas.length - 2];
                         
-                        // Si la URL es de una Pool, ajustamos el título y qué ronda miramos
                         const matchPoolId = url.match(/verPool=(\d+)/);
                         if (matchPoolId) {
                             titulo += ` (Pool ${matchPoolId[1]})`;
-                            penultima = rondas[rondas.length - 1]; // En pools la última columna es el ganador
+                            penultima = rondas[rondas.length - 1]; 
                         }
 
                         if(penultima) {
@@ -312,7 +309,7 @@
         function buscarTatamiParaCategoria(tituloCompleto) {
             const tituloMayus = tituloCompleto.toUpperCase();
             
-            // 1. Coincidencia exacta (por si hay suerte)
+            // 1. Coincidencia exacta
             if (tatamiDict[tituloMayus]) return tatamiDict[tituloMayus];
 
             // 2. Extraer el nombre base y el número de pool
@@ -330,7 +327,6 @@
                 key.includes(nombreBaseMayus) || nombreBaseMayus.includes(key)
             );
 
-            // Si el nombre varía mucho, buscamos coincidencias por palabras sueltas (>70% de coincidencia)
             if (posiblesClaves.length === 0) {
                 const palabras = nombreBaseMayus.split(/[\s-]+/).filter(p => p.length > 3);
                 posiblesClaves = Object.keys(tatamiDict).filter(key => {
@@ -339,40 +335,28 @@
                 });
             }
 
-            // 4. Si encontramos candidatos, los filtramos buscando el número de Pool exacto
+            // 4. Filtrar buscando el número de Pool exacto
             if (posiblesClaves.length > 0) {
                 if (poolNum) {
-                    // Esta regla busca "POOL 2", "P2", "P-2", "(2)", o "2/3" ignorando mayúsculas/espacios
-                    // Y evita confundir un peso como "-52KG" con una pool.
                     const regexPool = new RegExp(`\\b(?:POOL|P|G|GRUPO)\\s*-?\\s*0*${poolNum}\\b|\\b0*${poolNum}\\s*/|\\(0*${poolNum}\\)`, 'i');
-                    
                     for (let key of posiblesClaves) {
-                        if (regexPool.test(key)) {
-                            return tatamiDict[key];
-                        }
+                        if (regexPool.test(key)) return tatamiDict[key];
                     }
-                    
-                    // Si falla, probamos a ver si el texto del tatami simplemente TERMINA en ese número
                     const regexNumFinal = new RegExp(`\\b0*${poolNum}$`);
                     for (let key of posiblesClaves) {
                         if (regexNumFinal.test(key.trim())) return tatamiDict[key];
                     }
-
                 } else {
-                    // Si esta categoría NO es una pool, intentamos devolver una clave que no mencione pools
                     const regexCualquierPool = /\b(?:POOL|P|G)\s*\d+\b|\b\d+\s*\/\s*\d+\b|\(\d+\)/i;
                     for (let key of posiblesClaves) {
                         if (!regexCualquierPool.test(key)) return tatamiDict[key];
                     }
                 }
                 
-                // Fallback: si sabemos la categoría pero no logramos aislar la pool, 
-                // devolvemos el primero que haya coincidido
                 return tatamiDict[posiblesClaves[0]];
             }
 
             return "Desconocido";
-        }
         }
 
         function toggleVisto(url, btnElement) {
@@ -429,55 +413,59 @@
         }
 
         async function actualizarDatos() {
-            document.getElementById('loader').style.display = 'inline';
-            const tbody = document.querySelector("#data-table tbody");
-            tbody.innerHTML = ""; 
+            try {
+                document.getElementById('loader').style.display = 'inline';
+                const tbody = document.querySelector("#data-table tbody");
+                tbody.innerHTML = ""; 
 
-            tatamiDict = await obtenerTatamis();
-            const enlaces = await obtenerEnlacesIniciados();
+                tatamiDict = await obtenerTatamis();
+                const enlaces = await obtenerEnlacesIniciados();
 
-            for (let url of enlaces) {
-                const { titulo, estado, pendientes } = await verificarPuntuacionesYTitulo(url);
-                
-                // Usamos la nueva función inteligente para encontrar el tatami
-                const tatami = buscarTatamiParaCategoria(titulo);
-                
-                const tr = document.createElement("tr");
+                for (let url of enlaces) {
+                    const { titulo, estado, pendientes } = await verificarPuntuacionesYTitulo(url);
+                    const tatami = buscarTatamiParaCategoria(titulo);
+                    
+                    const tr = document.createElement("tr");
 
-                const tdVisto = document.createElement("td");
-                const isVisto = vistos[url] || false;
-                tdVisto.innerHTML = `<button class="btn-visto ${isVisto ? 'visto' : ''}" onclick="toggleVisto('${url}', this)">${isVisto ? '✔ Visto' : 'Marcar'}</button>`;
-                
-                const tdTatami = document.createElement("td");
-                tdTatami.textContent = tatami;
+                    const tdVisto = document.createElement("td");
+                    const isVisto = vistos[url] || false;
+                    tdVisto.innerHTML = `<button class="btn-visto ${isVisto ? 'visto' : ''}" onclick="toggleVisto('${url}', this)">${isVisto ? '✔ Visto' : 'Marcar'}</button>`;
+                    
+                    const tdTatami = document.createElement("td");
+                    tdTatami.textContent = tatami;
 
-                const tdCat = document.createElement("td");
-                tdCat.textContent = titulo;
+                    const tdCat = document.createElement("td");
+                    tdCat.textContent = titulo;
 
-                const tdEstado = document.createElement("td");
-                if (estado === null) {
-                    tdEstado.textContent = "-";
-                } else {
-                    tdEstado.innerHTML = estado ? '<span class="status-ok">OK</span>' : '<span class="status-error">X</span>';
+                    const tdEstado = document.createElement("td");
+                    if (estado === null) {
+                        tdEstado.textContent = "-";
+                    } else {
+                        tdEstado.innerHTML = estado ? '<span class="status-ok">OK</span>' : '<span class="status-error">X</span>';
+                    }
+
+                    const tdPendientes = document.createElement("td");
+                    tdPendientes.textContent = pendientes;
+
+                    const tdEnlace = document.createElement("td");
+                    tdEnlace.innerHTML = `<a href="${url}" target="_blank">Abrir ↗</a>`;
+
+                    tr.append(tdVisto, tdTatami, tdCat, tdEstado, tdPendientes, tdEnlace);
+                    tbody.appendChild(tr);
                 }
 
-                const tdPendientes = document.createElement("td");
-                tdPendientes.textContent = pendientes;
-
-                const tdEnlace = document.createElement("td");
-                tdEnlace.innerHTML = `<a href="${url}" target="_blank">Abrir ↗</a>`;
-
-                tr.append(tdVisto, tdTatami, tdCat, tdEstado, tdPendientes, tdEnlace);
-                tbody.appendChild(tr);
-            }
-
-            const now = new Date();
-            document.getElementById('last-update').textContent = now.toLocaleTimeString();
-            document.getElementById('loader').style.display = 'none';
-
-            if (sortCol !== -1) {
-                sortAsc = !sortAsc; 
-                sortTable(sortCol);
+                const now = new Date();
+                document.getElementById('last-update').textContent = now.toLocaleTimeString();
+                
+                if (sortCol !== -1) {
+                    sortAsc = !sortAsc; 
+                    sortTable(sortCol);
+                }
+            } catch (error) {
+                console.error("Error principal:", error);
+                document.getElementById('last-update').textContent = "Error al cargar datos";
+            } finally {
+                document.getElementById('loader').style.display = 'none';
             }
         }
 
