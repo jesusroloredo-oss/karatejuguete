@@ -109,6 +109,13 @@
             font-style: italic;
             color: #aaa;
         }
+        
+        #error-msg {
+            display: none;
+            color: var(--error-color);
+            font-weight: bold;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -116,7 +123,8 @@
     <div class="header">
         <div>
             <h1>Panel de Tatamis</h1>
-            <p>Última actualización: <span id="last-update">Nunca</span> <span id="loader">(Buscando categorías y pools...)</span></p>
+            <p>Última actualización: <span id="last-update">Nunca</span> <span id="loader">(Buscando datos...)</span></p>
+            <p id="error-msg">Error de conexión: El proxy ha fallado. Reintentando en breve...</p>
         </div>
         <button class="btn-refresh" onclick="actualizarDatos()">Refrescar Ahora</button>
     </div>
@@ -140,19 +148,25 @@
 
     <script>
         const BASE_URL = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
-        const PROXY_URL = "https://api.allorigins.win/get?url="; 
+        // Cambiamos a 'raw' para que devuelva el HTML directo sin fallos de JSON
+        const PROXY_URL = "https://api.allorigins.win/raw?url="; 
         
         let tatamiDict = {};
         let vistos = JSON.parse(localStorage.getItem('combates_vistos') || '{}');
         let sortCol = -1;
         let sortAsc = true;
+        let isFetching = false; // Evita que se solapen dos actualizaciones
 
         async function fetchHTML(url) {
-            const response = await fetch(PROXY_URL + encodeURIComponent(url));
+            // Añadimos un anti-caché para que AllOrigins no nos bloquee ni repita datos viejos
+            const separador = url.includes('?') ? '&' : '?';
+            const finalUrl = `${url}${separador}t=${Date.now()}`;
+            
+            const response = await fetch(PROXY_URL + encodeURIComponent(finalUrl));
             if (!response.ok) throw new Error('Error en la red');
-            const data = await response.json();
+            const text = await response.text();
             const parser = new DOMParser();
-            return parser.parseFromString(data.contents, "text/html");
+            return parser.parseFromString(text, "text/html");
         }
 
         async function obtenerTatamis() {
@@ -185,7 +199,7 @@
                 return dic;
             } catch (error) {
                 console.error("Error obteniendo tatamis:", error);
-                return {};
+                return tatamiDict; // Si falla, conservamos el diccionario anterior
             }
         }
 
@@ -205,11 +219,12 @@
                                 const idComp = match[1];
                                 const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
                                 
-                                // EXTRAER LA HORA DE LA FILA (Formato esperado: YYYY-MM-DD HH:MM:SS)
+                                // EXTRAER LA HORA DE LA FILA (Formato: YYYY-MM-DD HH:MM:SS)
                                 let horaInicio = "-";
-                                const dateMatch = row.textContent.match(/\d{4}-\d{2}-\d{2} (\d{2}:\d{2})(:\d{2})?/);
+                                const textContentRow = row.textContent.replace(/\s+/g, ' '); // Limpiamos saltos de línea
+                                const dateMatch = textContentRow.match(/\d{4}-\d{2}-\d{2}\s(\d{2}:\d{2})/);
                                 if (dateMatch) {
-                                    horaInicio = dateMatch[1]; // Cogemos solo el "HH:MM"
+                                    horaInicio = dateMatch[1];
                                 }
 
                                 try {
@@ -236,7 +251,7 @@
                                         enlaces.push({ url: urlBase, hora: horaInicio });
                                     }
                                 } catch (e) {
-                                    console.error("Error revisando pools:", e);
+                                    console.error("Error revisando pools en:", urlBase);
                                     enlaces.push({ url: urlBase, hora: horaInicio });
                                 }
                             }
@@ -245,8 +260,8 @@
                 }
                 return enlaces;
             } catch (error) {
-                console.error("Error obteniendo enlaces:", error);
-                return [];
+                console.error("Error obteniendo enlaces principales:", error);
+                throw error; // Lanza el error para que actualizarDatos lo cace
             }
         }
 
@@ -312,12 +327,10 @@
                 return { titulo, estado: todosValidos, pendientes: Math.max(0, combatesRestantes) };
 
             } catch (error) {
-                console.error("Error verificando url:", url);
                 return { titulo: "Error de carga", estado: false, pendientes: 0 };
             }
         }
 
-        // Buscador Inteligente de Tatamis (Versión Avanzada)
         function buscarTatamiParaCategoria(tituloCompleto) {
             const tituloMayus = tituloCompleto.toUpperCase();
             
@@ -404,17 +417,14 @@
                 let valB = b.cells[columnIndex].textContent.trim();
 
                 if (columnIndex === 0) { 
-                    // Columna Visto
                     valA = a.cells[0].querySelector('button').classList.contains('visto') ? 1 : 0;
                     valB = b.cells[0].querySelector('button').classList.contains('visto') ? 1 : 0;
                     return sortAsc ? valA - valB : valB - valA;
                 } else if (columnIndex === 5) { 
-                    // Columna Pendientes (Índice desplazado a 5 por la nueva columna Hora)
                     valA = parseInt(valA) || 0;
                     valB = parseInt(valB) || 0;
                     return sortAsc ? valA - valB : valB - valA;
                 } else { 
-                    // Resto de columnas de texto (incluida Hora en formato HH:MM que se ordena perfectamente como texto)
                     const cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
                     return sortAsc ? cmp : -cmp;
                 }
@@ -424,13 +434,23 @@
         }
 
         async function actualizarDatos() {
-            try {
-                document.getElementById('loader').style.display = 'inline';
-                const tbody = document.querySelector("#data-table tbody");
-                tbody.innerHTML = ""; 
+            if (isFetching) return;
+            isFetching = true;
+            
+            document.getElementById('loader').style.display = 'inline';
+            document.getElementById('error-msg').style.display = 'none';
 
-                tatamiDict = await obtenerTatamis();
+            try {
+                // Solo si tatamiDict está vacío lo pedimos
+                if (Object.keys(tatamiDict).length === 0) {
+                    tatamiDict = await obtenerTatamis();
+                }
+
                 const enlacesItems = await obtenerEnlacesIniciados();
+                
+                // Creamos un "DocumentFragment". Esto guarda las filas en memoria y no borra
+                // tu tabla actual hasta que todo esté cargado, evitando la pantalla en blanco.
+                const fragment = document.createDocumentFragment();
 
                 for (let item of enlacesItems) {
                     const url = item.url;
@@ -441,24 +461,19 @@
                     
                     const tr = document.createElement("tr");
 
-                    // 0. Columna Visto
                     const tdVisto = document.createElement("td");
                     const isVisto = vistos[url] || false;
                     tdVisto.innerHTML = `<button class="btn-visto ${isVisto ? 'visto' : ''}" onclick="toggleVisto('${url}', this)">${isVisto ? '✔ Visto' : 'Marcar'}</button>`;
                     
-                    // 1. Columna Hora
                     const tdHora = document.createElement("td");
                     tdHora.textContent = horaInicio;
 
-                    // 2. Columna Tatami
                     const tdTatami = document.createElement("td");
                     tdTatami.textContent = tatami;
 
-                    // 3. Columna Categoría
                     const tdCat = document.createElement("td");
                     tdCat.textContent = titulo;
 
-                    // 4. Columna Estado
                     const tdEstado = document.createElement("td");
                     if (estado === null) {
                         tdEstado.textContent = "-";
@@ -466,17 +481,20 @@
                         tdEstado.innerHTML = estado ? '<span class="status-ok">OK</span>' : '<span class="status-error">X</span>';
                     }
 
-                    // 5. Columna Pendientes
                     const tdPendientes = document.createElement("td");
                     tdPendientes.textContent = pendientes;
 
-                    // 6. Columna Enlace
                     const tdEnlace = document.createElement("td");
                     tdEnlace.innerHTML = `<a href="${url}" target="_blank">Abrir ↗</a>`;
 
                     tr.append(tdVisto, tdHora, tdTatami, tdCat, tdEstado, tdPendientes, tdEnlace);
-                    tbody.appendChild(tr);
+                    fragment.appendChild(tr);
                 }
+
+                // Ahora sí, sustituimos la tabla antigua por la nueva de golpe
+                const tbody = document.querySelector("#data-table tbody");
+                tbody.innerHTML = "";
+                tbody.appendChild(fragment);
 
                 const now = new Date();
                 document.getElementById('last-update').textContent = now.toLocaleTimeString();
@@ -485,11 +503,13 @@
                     sortAsc = !sortAsc; 
                     sortTable(sortCol);
                 }
+
             } catch (error) {
-                console.error("Error principal:", error);
-                document.getElementById('last-update').textContent = "Error al cargar datos";
+                console.error("Error crítico durante la actualización:", error);
+                document.getElementById('error-msg').style.display = 'block';
             } finally {
                 document.getElementById('loader').style.display = 'none';
+                isFetching = false;
             }
         }
 
