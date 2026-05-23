@@ -119,14 +119,14 @@
             margin-top: 5px;
         }
 
-        /* --- ESTILOS DEL NUEVO DASHBOARD DE BARRAS --- */
+        /* --- ESTILOS DEL DASHBOARD DE BARRAS --- */
         .dashboard {
             background: var(--row-bg);
             padding: 20px;
             border-radius: 8px;
             margin-top: 40px;
             border: 1px solid #444;
-            display: none; /* Se muestra al cargar datos */
+            display: none;
         }
         .dashboard h2 {
             margin-top: 0;
@@ -162,7 +162,7 @@
         .tatami-bar-fill {
             background: var(--bar-color);
             height: 100%;
-            width: 0%; /* Se llena por JS */
+            width: 0%; 
             transition: width 0.8s ease-in-out;
             border-radius: 6px;
         }
@@ -266,7 +266,10 @@
 
                 for (let row of filas) {
                     const tds = row.querySelectorAll("td");
-                    if (tds.length >= 3 && tds[1].querySelector(".fondoNaranja")) {
+                    
+                    // CORRECCIÓN: Quitamos el filtro estricto de .fondoNaranja.
+                    // Ahora cogemos cualquier fila que tenga el botón de los brackets.
+                    if (tds.length >= 3) {
                         const button = tds[2].querySelector("button[onclick]");
                         if (button) {
                             const match = button.getAttribute("onclick").match(/darValor\('idCompeticion',\s*(\d+)\)/);
@@ -490,32 +493,26 @@
             rows.forEach(row => tbody.appendChild(row));
         }
 
-        // --- NUEVA FUNCIÓN PARA DIBUJAR LAS BARRAS ---
         function renderTatamiBars(stats) {
             const container = document.getElementById("tatami-bars-container");
             container.innerHTML = "";
             
-            // Ordenar los nombres de los tatamis numéricamente (Ej: Tatami 1, Tatami 2, etc.)
             const tatamis = Object.keys(stats).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
             
             if (tatamis.length === 0) return;
             
-            // Mostrar el dashboard si hay datos
             document.getElementById("dashboard").style.display = "block";
             
-            // Buscamos cuál es el tatami con MÁS combates pendientes para usarlo como el 100% de ancho visual
             const maxPendientes = Math.max(...tatamis.map(t => stats[t].pendientes), 1);
             
             tatamis.forEach(t => {
                 const data = stats[t];
                 
-                // Si el tatami es Desconocido y no tiene pendientes, no lo mostramos para mantener limpio el panel
                 if (t === "Desconocido" && data.pendientes === 0) return;
 
                 const div = document.createElement("div");
                 div.className = "tatami-stat";
                 
-                // Calculamos cuánto debe llenarse la barra relativo al máximo
                 const porcentaje = (data.pendientes / maxPendientes) * 100;
                 
                 const nombreLimpio = t === "Desconocido" ? "Sin Asignar / Errores" : t;
@@ -542,7 +539,6 @@
             document.getElementById('error-msg').style.display = 'none';
             let hubErrores = false;
 
-            // Objeto donde guardaremos los contadores por tatami para las barras
             let statsPorTatami = {}; 
 
             try {
@@ -566,16 +562,13 @@
                     
                     const tatami = buscarTatamiParaCategoria(titulo);
                     
-                    // --- LÓGICA DE CONTADORES PARA LAS BARRAS ---
                     if (!statsPorTatami[tatami]) {
                         statsPorTatami[tatami] = { pendientes: 0, activas: 0 };
                     }
                     statsPorTatami[tatami].pendientes += pendientes;
-                    // Solo sumamos "categoría activa" si aún le quedan combates (Preparada/Iniciada)
                     if (pendientes > 0) {
                         statsPorTatami[tatami].activas += 1;
                     }
-                    // ---------------------------------------------
 
                     const tr = document.createElement("tr");
 
@@ -613,7 +606,6 @@
                 tbody.innerHTML = "";
                 tbody.appendChild(fragment);
 
-                // Llamamos a la función que dibuja las barras
                 renderTatamiBars(statsPorTatami);
 
                 const now = new Date();
@@ -641,7 +633,6 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             actualizarDatos();
-            // Refresco de datos cada 2 minutos y medio
             setInterval(actualizarDatos, 150000); 
         });
     </script>
