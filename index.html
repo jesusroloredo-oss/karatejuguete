@@ -13,6 +13,7 @@
             --row-alt: #252525;
             --ok-color: #4CAF50;
             --error-color: #F44336;
+            --bar-color: linear-gradient(90deg, #007acc, #00d2ff);
         }
 
         body {
@@ -51,6 +52,7 @@
             top: 0;
             cursor: pointer;
             user-select: none;
+            z-index: 10;
         }
 
         th:hover { 
@@ -116,6 +118,54 @@
             font-weight: bold;
             margin-top: 5px;
         }
+
+        /* --- ESTILOS DEL NUEVO DASHBOARD DE BARRAS --- */
+        .dashboard {
+            background: var(--row-bg);
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 40px;
+            border: 1px solid #444;
+            display: none; /* Se muestra al cargar datos */
+        }
+        .dashboard h2 {
+            margin-top: 0;
+            font-size: 1.3em;
+            border-bottom: 1px solid #555;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            color: #fff;
+        }
+        .tatami-stat {
+            margin-bottom: 15px;
+        }
+        .tatami-stat-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.95em;
+            margin-bottom: 6px;
+            font-weight: bold;
+        }
+        .tatami-stat-info {
+            color: #bbb;
+            font-weight: normal;
+            font-size: 0.9em;
+        }
+        .tatami-bar-bg {
+            background: #222;
+            border-radius: 6px;
+            height: 14px;
+            width: 100%;
+            overflow: hidden;
+            border: 1px solid #333;
+        }
+        .tatami-bar-fill {
+            background: var(--bar-color);
+            height: 100%;
+            width: 0%; /* Se llena por JS */
+            transition: width 0.8s ease-in-out;
+            border-radius: 6px;
+        }
     </style>
 </head>
 <body>
@@ -142,13 +192,17 @@
             </tr>
         </thead>
         <tbody>
-            <!-- Los datos se insertarán aquí con JS -->
-        </tbody>
+            </tbody>
     </table>
+
+    <div id="dashboard" class="dashboard">
+        <h2>Carga de trabajo pendiente por Tatami</h2>
+        <div id="tatami-bars-container">
+            </div>
+    </div>
 
     <script>
         const BASE_URL = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
-        // Cambiamos a corsproxy.io que gestiona mejor las peticiones múltiples y devuelve HTML directo
         const PROXY_URL = "https://corsproxy.io/?"; 
         
         let tatamiDict = {};
@@ -157,7 +211,6 @@
         let sortAsc = true;
         let isFetching = false;
 
-        // Aumentamos a 500ms para evitar que el proxy nos tire por límite de tasa (rate-limit)
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
         async function fetchHTML(url) {
@@ -166,7 +219,6 @@
             const response = await fetch(finalUrl);
             if (!response.ok) throw new Error('Error HTTP: ' + response.status);
             
-            // Usamos .text() en lugar de .json() porque corsproxy devuelve el HTML en crudo
             const text = await response.text();
             const parser = new DOMParser();
             return parser.parseFromString(text, "text/html");
@@ -202,7 +254,7 @@
                 return dic;
             } catch (error) {
                 console.error("Fallo al obtener tatamis:", error);
-                return {}; // Devolvemos vacío para activar la seguridad en actualizarDatos()
+                return {}; 
             }
         }
 
@@ -438,6 +490,50 @@
             rows.forEach(row => tbody.appendChild(row));
         }
 
+        // --- NUEVA FUNCIÓN PARA DIBUJAR LAS BARRAS ---
+        function renderTatamiBars(stats) {
+            const container = document.getElementById("tatami-bars-container");
+            container.innerHTML = "";
+            
+            // Ordenar los nombres de los tatamis numéricamente (Ej: Tatami 1, Tatami 2, etc.)
+            const tatamis = Object.keys(stats).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+            
+            if (tatamis.length === 0) return;
+            
+            // Mostrar el dashboard si hay datos
+            document.getElementById("dashboard").style.display = "block";
+            
+            // Buscamos cuál es el tatami con MÁS combates pendientes para usarlo como el 100% de ancho visual
+            const maxPendientes = Math.max(...tatamis.map(t => stats[t].pendientes), 1);
+            
+            tatamis.forEach(t => {
+                const data = stats[t];
+                
+                // Si el tatami es Desconocido y no tiene pendientes, no lo mostramos para mantener limpio el panel
+                if (t === "Desconocido" && data.pendientes === 0) return;
+
+                const div = document.createElement("div");
+                div.className = "tatami-stat";
+                
+                // Calculamos cuánto debe llenarse la barra relativo al máximo
+                const porcentaje = (data.pendientes / maxPendientes) * 100;
+                
+                const nombreLimpio = t === "Desconocido" ? "Sin Asignar / Errores" : t;
+                const textoCategorias = data.activas === 1 ? "categoría" : "categorías";
+
+                div.innerHTML = `
+                    <div class="tatami-stat-header">
+                        <span>${nombreLimpio} <span class="tatami-stat-info">(${data.activas} ${textoCategorias} activa/s)</span></span>
+                        <span>${data.pendientes} encuentros</span>
+                    </div>
+                    <div class="tatami-bar-bg">
+                        <div class="tatami-bar-fill" style="width: ${porcentaje}%;"></div>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
         async function actualizarDatos() {
             if (isFetching) return;
             isFetching = true;
@@ -446,12 +542,12 @@
             document.getElementById('error-msg').style.display = 'none';
             let hubErrores = false;
 
+            // Objeto donde guardaremos los contadores por tatami para las barras
+            let statsPorTatami = {}; 
+
             try {
-                // Obtenemos los tatamis nuevos
                 const nuevosTatamis = await obtenerTatamis();
                 
-                // SISTEMA DE SEGURIDAD: Si falla y devuelve vacío, cancelamos la actualización 
-                // para no pisar la tabla buena que tengas en pantalla con "Desconocidos".
                 if (Object.keys(nuevosTatamis).length === 0) {
                     throw new Error("Proxy bloqueó la petición de Tatamis.");
                 } else {
@@ -470,6 +566,17 @@
                     
                     const tatami = buscarTatamiParaCategoria(titulo);
                     
+                    // --- LÓGICA DE CONTADORES PARA LAS BARRAS ---
+                    if (!statsPorTatami[tatami]) {
+                        statsPorTatami[tatami] = { pendientes: 0, activas: 0 };
+                    }
+                    statsPorTatami[tatami].pendientes += pendientes;
+                    // Solo sumamos "categoría activa" si aún le quedan combates (Preparada/Iniciada)
+                    if (pendientes > 0) {
+                        statsPorTatami[tatami].activas += 1;
+                    }
+                    // ---------------------------------------------
+
                     const tr = document.createElement("tr");
 
                     const tdVisto = document.createElement("td");
@@ -502,10 +609,12 @@
                     fragment.appendChild(tr);
                 }
 
-                // Si llegamos hasta aquí sin que el proxy rompa todo de forma crítica, actualizamos el HTML
                 const tbody = document.querySelector("#data-table tbody");
                 tbody.innerHTML = "";
                 tbody.appendChild(fragment);
+
+                // Llamamos a la función que dibuja las barras
+                renderTatamiBars(statsPorTatami);
 
                 const now = new Date();
                 document.getElementById('last-update').textContent = now.toLocaleTimeString();
@@ -532,7 +641,7 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             actualizarDatos();
-            // Refresco cada 2 minutos y medio para que el proxy descanse y no te bloquee
+            // Refresco de datos cada 2 minutos y medio
             setInterval(actualizarDatos, 150000); 
         });
     </script>
