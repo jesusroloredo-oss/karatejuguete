@@ -308,46 +308,71 @@
             }
         }
 
-        // Buscador Inteligente de Tatamis
+        // Buscador Inteligente de Tatamis (Versión Avanzada)
         function buscarTatamiParaCategoria(tituloCompleto) {
             const tituloMayus = tituloCompleto.toUpperCase();
             
-            // 1. Intentar coincidencia exacta (por si en la web del tatami pone "CATEGORIA (POOL 1)")
+            // 1. Coincidencia exacta (por si hay suerte)
             if (tatamiDict[tituloMayus]) return tatamiDict[tituloMayus];
 
-            // Sacamos el nombre base sin lo de (Pool X) ni (Liguilla)
+            // 2. Extraer el nombre base y el número de pool
             let nombreBase = tituloCompleto;
             if (tituloCompleto.includes(' (')) {
                 nombreBase = tituloCompleto.split(' (')[0].trim();
             }
             const nombreBaseMayus = nombreBase.toUpperCase();
+            
+            const matchPool = tituloCompleto.match(/POOL\s*(\d+)/i);
+            const poolNum = matchPool ? matchPool[1] : null;
 
-            // Si es una Pool, construimos diferentes variantes comunes en Karate Scoring
-            const matchPool = tituloCompleto.match(/Pool\s*(\d+)/i);
-            if (matchPool) {
-                const poolNum = matchPool[1];
-                const variantes = [
-                    `${nombreBaseMayus} POOL ${poolNum}`,
-                    `${nombreBaseMayus} - POOL ${poolNum}`,
-                    `${nombreBaseMayus} (POOL ${poolNum})`
-                ];
-                
-                for (let v of variantes) {
-                    if (tatamiDict[v]) return tatamiDict[v];
-                }
+            // 3. Encontrar TODOS los tatamis que tengan una categoría con el mismo nombre base
+            let posiblesClaves = Object.keys(tatamiDict).filter(key => 
+                key.includes(nombreBaseMayus) || nombreBaseMayus.includes(key)
+            );
 
-                // Búsqueda profunda: revisar si alguna clave CONTIENE el nombre base y el número de pool
-                for (let key in tatamiDict) {
-                    if (key.includes(nombreBaseMayus) && key.includes(`POOL ${poolNum}`)) {
-                        return tatamiDict[key];
-                    }
-                }
+            // Si el nombre varía mucho, buscamos coincidencias por palabras sueltas (>70% de coincidencia)
+            if (posiblesClaves.length === 0) {
+                const palabras = nombreBaseMayus.split(/[\s-]+/).filter(p => p.length > 3);
+                posiblesClaves = Object.keys(tatamiDict).filter(key => {
+                    let matches = palabras.filter(p => key.includes(p)).length;
+                    return palabras.length > 0 && (matches / palabras.length) >= 0.7;
+                });
             }
 
-            // Fallback final al nombre base
-            if (tatamiDict[nombreBaseMayus]) return tatamiDict[nombreBaseMayus];
+            // 4. Si encontramos candidatos, los filtramos buscando el número de Pool exacto
+            if (posiblesClaves.length > 0) {
+                if (poolNum) {
+                    // Esta regla busca "POOL 2", "P2", "P-2", "(2)", o "2/3" ignorando mayúsculas/espacios
+                    // Y evita confundir un peso como "-52KG" con una pool.
+                    const regexPool = new RegExp(`\\b(?:POOL|P|G|GRUPO)\\s*-?\\s*0*${poolNum}\\b|\\b0*${poolNum}\\s*/|\\(0*${poolNum}\\)`, 'i');
+                    
+                    for (let key of posiblesClaves) {
+                        if (regexPool.test(key)) {
+                            return tatamiDict[key];
+                        }
+                    }
+                    
+                    // Si falla, probamos a ver si el texto del tatami simplemente TERMINA en ese número
+                    const regexNumFinal = new RegExp(`\\b0*${poolNum}$`);
+                    for (let key of posiblesClaves) {
+                        if (regexNumFinal.test(key.trim())) return tatamiDict[key];
+                    }
+
+                } else {
+                    // Si esta categoría NO es una pool, intentamos devolver una clave que no mencione pools
+                    const regexCualquierPool = /\b(?:POOL|P|G)\s*\d+\b|\b\d+\s*\/\s*\d+\b|\(\d+\)/i;
+                    for (let key of posiblesClaves) {
+                        if (!regexCualquierPool.test(key)) return tatamiDict[key];
+                    }
+                }
+                
+                // Fallback: si sabemos la categoría pero no logramos aislar la pool, 
+                // devolvemos el primero que haya coincidido
+                return tatamiDict[posiblesClaves[0]];
+            }
 
             return "Desconocido";
+        }
         }
 
         function toggleVisto(url, btnElement) {
