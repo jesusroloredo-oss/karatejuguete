@@ -267,11 +267,14 @@
                     const tds = row.querySelectorAll("td");
                     if (tds.length < 3) continue;
 
-                    const isFinalizada = Array.from(tds).some(td => td.textContent.trim().toUpperCase() === "FINALIZADA");
-                    if (isFinalizada) continue;
+                    // NUEVO FILTRO FLEXIBLE: Convertimos toda la fila a mayúsculas y comprobamos si incluye las palabras
+                    const textoFilaCompleta = row.textContent.toUpperCase();
+                    
+                    // Si menciona Finalizada en cualquier lugar de la fila, la ignoramos por completo
+                    if (textoFilaCompleta.includes("FINALIZADA")) continue;
 
-                    // Capturamos si la categoría está en estado "Preparada"
-                    const isPreparada = Array.from(tds).some(td => td.textContent.trim().toUpperCase() === "PREPARADA");
+                    // Comprobamos si está Preparada
+                    const isPreparada = textoFilaCompleta.includes("PREPARADA");
 
                     let idComp = null;
                     const idElement = row.querySelector(".casillaIdCompeticion");
@@ -319,7 +322,7 @@
                                     enlaces.push({
                                         url: `${urlBase}&verPool=${idx}&poolMostrada=1`,
                                         hora: horaInicio,
-                                        isPreparada: isPreparada // Pasamos el flag
+                                        isPreparada: isPreparada
                                     });
                                 }
                             } else {
@@ -578,7 +581,7 @@
                     
                     const tatami = buscarTatamiParaCategoria(titulo);
                     
-                    // Contamos SIEMPRE para las barras
+                    // Sumamos siempre a las barras de abajo
                     if (!statsPorTatami[tatami]) {
                         statsPorTatami[tatami] = { pendientes: 0, activas: 0 };
                     }
@@ -587,8 +590,9 @@
                         statsPorTatami[tatami].activas += 1;
                     }
 
-                    // FILTRO: Si está Preparada, saltamos la creación de la fila para que NO salga en la tabla
-                    if (isPreparada) {
+                    // DOBLE FILTRO DE LIMPIEZA PARA LA TABLA SUPERIOR:
+                    // Si está Preparada, O si ya tiene 0 pendientes (no queda nada por hacer), la ocultamos.
+                    if (isPreparada || (pendientes === 0 && titulo !== "Error de carga")) {
                         continue;
                     }
 
@@ -655,7 +659,7 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             actualizarDatos();
-            setInterval(actualizarDatos, 120000); // 2 minutos
+            setInterval(actualizarDatos, 120000); 
         });
     </script>
 </body>
