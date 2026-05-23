@@ -49,8 +49,8 @@
             color: white;
             position: sticky;
             top: 0;
-            cursor: pointer; /* Hace que aparezca la 'manita' al pasar el ratón */
-            user-select: none; /* Evita que el texto se seleccione al hacer doble clic */
+            cursor: pointer;
+            user-select: none;
         }
 
         th:hover { 
@@ -115,7 +115,7 @@
     <div class="header">
         <div>
             <h1>Panel de Tatamis</h1>
-            <p>Última actualización: <span id="last-update">Nunca</span> <span id="loader">(Actualizando...)</span></p>
+            <p>Última actualización: <span id="last-update">Nunca</span> <span id="loader">(Buscando categorías y pools...)</span></p>
         </div>
         <button class="btn-refresh" onclick="actualizarDatos()">Refrescar Ahora</button>
     </div>
@@ -138,15 +138,13 @@
 
     <script>
         const BASE_URL = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
-        // Usamos AllOrigins como proxy CORS para poder leer el HTML desde GitHub Pages
         const PROXY_URL = "https://api.allorigins.win/get?url="; 
         
         let tatamiDict = {};
         let vistos = JSON.parse(localStorage.getItem('combates_vistos') || '{}');
-        let sortCol = -1; // Guarda qué columna está ordenada actualmente
-        let sortAsc = true; // Guarda si el orden es ascendente o descendente
+        let sortCol = -1;
+        let sortAsc = true;
 
-        // Función auxiliar para hacer fetch a través del proxy y parsear el HTML
         async function fetchHTML(url) {
             const response = await fetch(PROXY_URL + encodeURIComponent(url));
             if (!response.ok) throw new Error('Error en la red');
@@ -163,8 +161,6 @@
                 
                 h4s.forEach(h4 => {
                     const tatamiNombre = h4.textContent.trim();
-                    
-                    // Emulamos el "find_next_sibling('div')" de Python
                     let divHermano = h4.nextElementSibling;
                     while (divHermano && divHermano.tagName.toLowerCase() !== 'div') {
                         divHermano = divHermano.nextElementSibling;
@@ -179,8 +175,8 @@
                     filas.forEach(fila => {
                         const celdas = fila.querySelectorAll("td");
                         if (celdas.length >= 2) {
-                            // Limpiamos espacios dobles o saltos de línea ocultos
-                            const nombreCat = celdas[1].textContent.replace(/\s+/g, ' ').trim();
+                            // Guardamos todo en MAYÚSCULAS para cruzar datos sin error
+                            const nombreCat = celdas[1].textContent.replace(/\s+/g, ' ').trim().toUpperCase();
                             dic[nombreCat] = tatamiNombre;
                         }
                     });
@@ -207,7 +203,32 @@
                             if (match) {
                                 const idComp = match[1];
                                 const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
-                                enlaces.push(urlBase);
+                                
+                                // Entramos a la URL para comprobar si está dividida en Pools
+                                try {
+                                    const docComp = await fetchHTML(urlBase);
+                                    const poolElements = docComp.querySelectorAll(".rotuloGrupo");
+                                    let numPools = 0;
+                                    
+                                    if (poolElements.length > 0) {
+                                        const textoPool = poolElements[0].textContent.trim();
+                                        const matchPool = textoPool.match(/\/\s*(\d+)/);
+                                        if (matchPool) {
+                                            numPools = parseInt(matchPool[1]);
+                                        }
+                                    }
+
+                                    if (numPools > 1) {
+                                        for (let idx = 1; idx <= numPools; idx++) {
+                                            enlaces.push(`${urlBase}&verPool=${idx}&poolMostrada=1`);
+                                        }
+                                    } else {
+                                        enlaces.push(urlBase);
+                                    }
+                                } catch (e) {
+                                    console.error("Error revisando pools:", e);
+                                    enlaces.push(urlBase);
+                                }
                             }
                         }
                     }
@@ -223,8 +244,6 @@
             try {
                 const doc = await fetchHTML(url);
                 const tituloElement = doc.querySelector("h3");
-                
-                // Limpiamos también el título base de la misma manera que el diccionario
                 let titulo = tituloElement ? tituloElement.textContent.replace(/\s+/g, ' ').trim() : "Desconocido";
 
                 const liguillas = Array.from(doc.querySelectorAll(".cajaEncuentroLiguilla"));
@@ -247,7 +266,6 @@
                     return { titulo, estado: null, pendientes: combatesRestantes };
                 }
 
-                // Lógica de Eliminatorias
                 const poolContainer = doc.querySelector(".cajaPoolEliminatorias");
                 if (poolContainer) {
                     const rondas = Array.from(poolContainer.querySelectorAll(".cajaRondaEliminatorias"));
@@ -266,9 +284,19 @@
                     }
 
                     if (rondas.length >= 2) {
-                        const penultima = rondas[rondas.length - 2];
-                        const puntos = Array.from(penultima.querySelectorAll(".cajaPuntos"));
-                        todosValidos = puntos.length > 0 && puntos.every(p => p.textContent.trim() !== "");
+                        let penultima = rondas[rondas.length - 2];
+                        
+                        // Si la URL es de una Pool, ajustamos el título y qué ronda miramos
+                        const matchPoolId = url.match(/verPool=(\d+)/);
+                        if (matchPoolId) {
+                            titulo += ` (Pool ${matchPoolId[1]})`;
+                            penultima = rondas[rondas.length - 1]; // En pools la última columna es el ganador
+                        }
+
+                        if(penultima) {
+                            const puntos = Array.from(penultima.querySelectorAll(".cajaPuntos"));
+                            todosValidos = puntos.length > 0 && puntos.every(p => p.textContent.trim() !== "");
+                        }
                     }
                 }
 
@@ -278,6 +306,48 @@
                 console.error("Error verificando url:", url);
                 return { titulo: "Error de carga", estado: false, pendientes: 0 };
             }
+        }
+
+        // Buscador Inteligente de Tatamis
+        function buscarTatamiParaCategoria(tituloCompleto) {
+            const tituloMayus = tituloCompleto.toUpperCase();
+            
+            // 1. Intentar coincidencia exacta (por si en la web del tatami pone "CATEGORIA (POOL 1)")
+            if (tatamiDict[tituloMayus]) return tatamiDict[tituloMayus];
+
+            // Sacamos el nombre base sin lo de (Pool X) ni (Liguilla)
+            let nombreBase = tituloCompleto;
+            if (tituloCompleto.includes(' (')) {
+                nombreBase = tituloCompleto.split(' (')[0].trim();
+            }
+            const nombreBaseMayus = nombreBase.toUpperCase();
+
+            // Si es una Pool, construimos diferentes variantes comunes en Karate Scoring
+            const matchPool = tituloCompleto.match(/Pool\s*(\d+)/i);
+            if (matchPool) {
+                const poolNum = matchPool[1];
+                const variantes = [
+                    `${nombreBaseMayus} POOL ${poolNum}`,
+                    `${nombreBaseMayus} - POOL ${poolNum}`,
+                    `${nombreBaseMayus} (POOL ${poolNum})`
+                ];
+                
+                for (let v of variantes) {
+                    if (tatamiDict[v]) return tatamiDict[v];
+                }
+
+                // Búsqueda profunda: revisar si alguna clave CONTIENE el nombre base y el número de pool
+                for (let key in tatamiDict) {
+                    if (key.includes(nombreBaseMayus) && key.includes(`POOL ${poolNum}`)) {
+                        return tatamiDict[key];
+                    }
+                }
+            }
+
+            // Fallback final al nombre base
+            if (tatamiDict[nombreBaseMayus]) return tatamiDict[nombreBaseMayus];
+
+            return "Desconocido";
         }
 
         function toggleVisto(url, btnElement) {
@@ -298,7 +368,6 @@
             const tbody = table.querySelector("tbody");
             const rows = Array.from(tbody.querySelectorAll("tr"));
 
-            // Si pulsamos la misma columna, invertimos el orden. Si es nueva, por defecto ascendente.
             if (sortCol === columnIndex) {
                 sortAsc = !sortAsc;
             } else {
@@ -306,7 +375,6 @@
                 sortCol = columnIndex;
             }
 
-            // Limpiamos los iconos de todas las columnas y ponemos la flecha en la activa
             const ths = table.querySelectorAll("th");
             ths.forEach(th => {
                 const icon = th.querySelector('.sort-icon');
@@ -314,29 +382,24 @@
             });
             ths[columnIndex].querySelector('.sort-icon').textContent = sortAsc ? ' ▲' : ' ▼';
 
-            // Ordenamos las filas
             rows.sort((a, b) => {
                 let valA = a.cells[columnIndex].textContent.trim();
                 let valB = b.cells[columnIndex].textContent.trim();
 
                 if (columnIndex === 0) { 
-                    // Columna "Visto"
                     valA = a.cells[0].querySelector('button').classList.contains('visto') ? 1 : 0;
                     valB = b.cells[0].querySelector('button').classList.contains('visto') ? 1 : 0;
                     return sortAsc ? valA - valB : valB - valA;
                 } else if (columnIndex === 4) { 
-                    // Columna "Pendientes"
                     valA = parseInt(valA) || 0;
                     valB = parseInt(valB) || 0;
                     return sortAsc ? valA - valB : valB - valA;
                 } else { 
-                    // Columnas de Texto (localeCompare con numeric arregla que el Tatami 2 vaya antes que el 10)
                     const cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
                     return sortAsc ? cmp : -cmp;
                 }
             });
 
-            // Volvemos a insertar las filas ya ordenadas en la tabla
             rows.forEach(row => tbody.appendChild(row));
         }
 
@@ -345,19 +408,14 @@
             const tbody = document.querySelector("#data-table tbody");
             tbody.innerHTML = ""; 
 
-            // Forzamos cargar el diccionario cada vez por si cambian tatamis a mitad de mañana
             tatamiDict = await obtenerTatamis();
-
             const enlaces = await obtenerEnlacesIniciados();
 
             for (let url of enlaces) {
                 const { titulo, estado, pendientes } = await verificarPuntuacionesYTitulo(url);
                 
-                // Extraemos el nombre base limpiando espacios y partiendo por el paréntesis de Liguilla/Pool
-                const nombreBase = titulo.includes(' (') ? titulo.split(' (')[0].trim() : titulo.trim();
-                
-                // Buscamos en el diccionario
-                const tatami = tatamiDict[nombreBase] || "Desconocido";
+                // Usamos la nueva función inteligente para encontrar el tatami
+                const tatami = buscarTatamiParaCategoria(titulo);
                 
                 const tr = document.createElement("tr");
 
@@ -392,17 +450,14 @@
             document.getElementById('last-update').textContent = now.toLocaleTimeString();
             document.getElementById('loader').style.display = 'none';
 
-            // Si el usuario tenía la tabla ordenada, la volvemos a ordenar tras refrescar
             if (sortCol !== -1) {
-                sortAsc = !sortAsc; // Invertimos temporalmente para que sortTable lo vuelva a dejar como estaba
+                sortAsc = !sortAsc; 
                 sortTable(sortCol);
             }
         }
 
-        // Cargar al iniciar
         document.addEventListener('DOMContentLoaded', () => {
             actualizarDatos();
-            // Refresco automático cada 60 segundos
             setInterval(actualizarDatos, 60000);
         });
     </script>
