@@ -123,8 +123,8 @@
     <div class="header">
         <div>
             <h1>Panel de Tatamis</h1>
-            <p>Última actualización: <span id="last-update">Nunca</span> <span id="loader">(Buscando datos...)</span></p>
-            <p id="error-msg">Aviso: Ha habido un error leyendo alguna categoría.</p>
+            <p>Última actualización: <span id="last-update">Nunca</span> <span id="loader">(Buscando datos, puede tardar un poco...)</span></p>
+            <p id="error-msg">Aviso: El proxy está saturado. Se mantendrán los datos anteriores.</p>
         </div>
         <button class="btn-refresh" onclick="actualizarDatos()">Refrescar Ahora</button>
     </div>
@@ -148,8 +148,8 @@
 
     <script>
         const BASE_URL = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
-        // VOLVEMOS AL PROXY JSON QUE SÍ TE FUNCIONABA
-        const PROXY_URL = "https://api.allorigins.win/get?url="; 
+        // Cambiamos a corsproxy.io que gestiona mejor las peticiones múltiples y devuelve HTML directo
+        const PROXY_URL = "https://corsproxy.io/?"; 
         
         let tatamiDict = {};
         let vistos = JSON.parse(localStorage.getItem('combates_vistos') || '{}');
@@ -157,19 +157,19 @@
         let sortAsc = true;
         let isFetching = false;
 
-        // Función para dar un respiro al proxy y que no nos bloquee (300 milisegundos)
+        // Aumentamos a 500ms para evitar que el proxy nos tire por límite de tasa (rate-limit)
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
         async function fetchHTML(url) {
-            const separador = url.includes('?') ? '&' : '?';
-            const finalUrl = `${url}${separador}t=${Date.now()}`;
+            const finalUrl = PROXY_URL + encodeURIComponent(url);
             
-            const response = await fetch(PROXY_URL + encodeURIComponent(finalUrl));
-            if (!response.ok) throw new Error('Error en la red');
+            const response = await fetch(finalUrl);
+            if (!response.ok) throw new Error('Error HTTP: ' + response.status);
             
-            const data = await response.json();
+            // Usamos .text() en lugar de .json() porque corsproxy devuelve el HTML en crudo
+            const text = await response.text();
             const parser = new DOMParser();
-            return parser.parseFromString(data.contents, "text/html");
+            return parser.parseFromString(text, "text/html");
         }
 
         async function obtenerTatamis() {
@@ -201,8 +201,8 @@
                 });
                 return dic;
             } catch (error) {
-                console.error("Error obteniendo tatamis:", error);
-                return tatamiDict;
+                console.error("Fallo al obtener tatamis:", error);
+                return {}; // Devolvemos vacío para activar la seguridad en actualizarDatos()
             }
         }
 
@@ -222,19 +222,17 @@
                                 const idComp = match[1];
                                 const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
                                 
-                                // EXTRACCIÓN DE LA HORA (CELDA POR CELDA)
                                 let horaInicio = "-";
                                 for (let td of tds) {
-                                    // Busca "YYYY-MM-DD HH:MM", da igual los espacios que haya
                                     const dateMatch = td.textContent.trim().match(/\d{4}-\d{2}-\d{2}\s+(\d{2}:\d{2})/);
                                     if (dateMatch) {
-                                        horaInicio = dateMatch[1]; // Nos quedamos solo con la hora
+                                        horaInicio = dateMatch[1];
                                         break;
                                     }
                                 }
 
                                 try {
-                                    await sleep(300); // Pausa para no saturar al proxy
+                                    await sleep(500); 
                                     const docComp = await fetchHTML(urlBase);
                                     const poolElements = docComp.querySelectorAll(".rotuloGrupo");
                                     let numPools = 0;
@@ -258,7 +256,6 @@
                                         enlaces.push({ url: urlBase, hora: horaInicio });
                                     }
                                 } catch (e) {
-                                    console.error("Error revisando pools en:", urlBase);
                                     enlaces.push({ url: urlBase, hora: horaInicio });
                                 }
                             }
@@ -267,14 +264,13 @@
                 }
                 return enlaces;
             } catch (error) {
-                console.error("Error obteniendo enlaces principales:", error);
                 throw error; 
             }
         }
 
         async function verificarPuntuacionesYTitulo(url) {
             try {
-                await sleep(300); // Pausa antes de comprobar la puntuación
+                await sleep(500);
                 const doc = await fetchHTML(url);
                 const tituloElement = doc.querySelector("h3");
                 let titulo = tituloElement ? tituloElement.textContent.replace(/\s+/g, ' ').trim() : "Desconocido";
@@ -451,8 +447,15 @@
             let hubErrores = false;
 
             try {
-                if (Object.keys(tatamiDict).length === 0) {
-                    tatamiDict = await obtenerTatamis();
+                // Obtenemos los tatamis nuevos
+                const nuevosTatamis = await obtenerTatamis();
+                
+                // SISTEMA DE SEGURIDAD: Si falla y devuelve vacío, cancelamos la actualización 
+                // para no pisar la tabla buena que tengas en pantalla con "Desconocidos".
+                if (Object.keys(nuevosTatamis).length === 0) {
+                    throw new Error("Proxy bloqueó la petición de Tatamis.");
+                } else {
+                    tatamiDict = nuevosTatamis;
                 }
 
                 const enlacesItems = await obtenerEnlacesIniciados();
@@ -499,6 +502,7 @@
                     fragment.appendChild(tr);
                 }
 
+                // Si llegamos hasta aquí sin que el proxy rompa todo de forma crítica, actualizamos el HTML
                 const tbody = document.querySelector("#data-table tbody");
                 tbody.innerHTML = "";
                 tbody.appendChild(fragment);
@@ -507,6 +511,7 @@
                 document.getElementById('last-update').textContent = now.toLocaleTimeString();
                 
                 if (hubErrores) {
+                    document.getElementById('error-msg').textContent = "Aviso: Alguna categoría no cargó correctamente (reintento automático en breve).";
                     document.getElementById('error-msg').style.display = 'block';
                 }
                 
@@ -516,7 +521,8 @@
                 }
 
             } catch (error) {
-                console.error("Error crítico durante la actualización:", error);
+                console.error("Error crítico:", error);
+                document.getElementById('error-msg').textContent = "Aviso: El proxy está saturado. Mostrando la última versión válida.";
                 document.getElementById('error-msg').style.display = 'block';
             } finally {
                 document.getElementById('loader').style.display = 'none';
@@ -526,8 +532,8 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             actualizarDatos();
-            // Lo bajamos a refrescar cada 2 minutos para no agotar el proxy gratis tan rápido
-            setInterval(actualizarDatos, 120000); 
+            // Refresco cada 2 minutos y medio para que el proxy descanse y no te bloquee
+            setInterval(actualizarDatos, 150000); 
         });
     </script>
 </body>
