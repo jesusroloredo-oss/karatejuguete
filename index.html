@@ -49,6 +49,18 @@
             color: white;
             position: sticky;
             top: 0;
+            cursor: pointer; /* Hace que aparezca la 'manita' al pasar el ratón */
+            user-select: none; /* Evita que el texto se seleccione al hacer doble clic */
+        }
+
+        th:hover { 
+            background-color: #005f9e; 
+        }
+
+        .sort-icon { 
+            font-size: 0.8em; 
+            margin-left: 5px; 
+            opacity: 0.8;
         }
 
         tr:nth-child(even) { background-color: var(--row-alt); }
@@ -111,11 +123,11 @@
     <table id="data-table">
         <thead>
             <tr>
-                <th>Visto</th>
-                <th>Tatami</th>
-                <th>Categoría</th>
-                <th>Estado</th>
-                <th>Pendientes</th>
+                <th onclick="sortTable(0)">Visto <span class="sort-icon"></span></th>
+                <th onclick="sortTable(1)">Tatami <span class="sort-icon"></span></th>
+                <th onclick="sortTable(2)">Categoría <span class="sort-icon"></span></th>
+                <th onclick="sortTable(3)">Estado <span class="sort-icon"></span></th>
+                <th onclick="sortTable(4)">Pendientes <span class="sort-icon"></span></th>
                 <th>Enlace</th>
             </tr>
         </thead>
@@ -125,12 +137,14 @@
     </table>
 
     <script>
-      const BASE_URL = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
+        const BASE_URL = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
         // Usamos AllOrigins como proxy CORS para poder leer el HTML desde GitHub Pages
         const PROXY_URL = "https://api.allorigins.win/get?url="; 
         
         let tatamiDict = {};
         let vistos = JSON.parse(localStorage.getItem('combates_vistos') || '{}');
+        let sortCol = -1; // Guarda qué columna está ordenada actualmente
+        let sortAsc = true; // Guarda si el orden es ascendente o descendente
 
         // Función auxiliar para hacer fetch a través del proxy y parsear el HTML
         async function fetchHTML(url) {
@@ -151,7 +165,6 @@
                     const tatamiNombre = h4.textContent.trim();
                     
                     // Emulamos el "find_next_sibling('div')" de Python
-                    // Saltamos elementos hasta encontrar un <div>
                     let divHermano = h4.nextElementSibling;
                     while (divHermano && divHermano.tagName.toLowerCase() !== 'div') {
                         divHermano = divHermano.nextElementSibling;
@@ -280,6 +293,53 @@
             }
         }
 
+        function sortTable(columnIndex) {
+            const table = document.getElementById("data-table");
+            const tbody = table.querySelector("tbody");
+            const rows = Array.from(tbody.querySelectorAll("tr"));
+
+            // Si pulsamos la misma columna, invertimos el orden. Si es nueva, por defecto ascendente.
+            if (sortCol === columnIndex) {
+                sortAsc = !sortAsc;
+            } else {
+                sortAsc = true;
+                sortCol = columnIndex;
+            }
+
+            // Limpiamos los iconos de todas las columnas y ponemos la flecha en la activa
+            const ths = table.querySelectorAll("th");
+            ths.forEach(th => {
+                const icon = th.querySelector('.sort-icon');
+                if(icon) icon.textContent = '';
+            });
+            ths[columnIndex].querySelector('.sort-icon').textContent = sortAsc ? ' ▲' : ' ▼';
+
+            // Ordenamos las filas
+            rows.sort((a, b) => {
+                let valA = a.cells[columnIndex].textContent.trim();
+                let valB = b.cells[columnIndex].textContent.trim();
+
+                if (columnIndex === 0) { 
+                    // Columna "Visto"
+                    valA = a.cells[0].querySelector('button').classList.contains('visto') ? 1 : 0;
+                    valB = b.cells[0].querySelector('button').classList.contains('visto') ? 1 : 0;
+                    return sortAsc ? valA - valB : valB - valA;
+                } else if (columnIndex === 4) { 
+                    // Columna "Pendientes"
+                    valA = parseInt(valA) || 0;
+                    valB = parseInt(valB) || 0;
+                    return sortAsc ? valA - valB : valB - valA;
+                } else { 
+                    // Columnas de Texto (localeCompare con numeric arregla que el Tatami 2 vaya antes que el 10)
+                    const cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+                    return sortAsc ? cmp : -cmp;
+                }
+            });
+
+            // Volvemos a insertar las filas ya ordenadas en la tabla
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
         async function actualizarDatos() {
             document.getElementById('loader').style.display = 'inline';
             const tbody = document.querySelector("#data-table tbody");
@@ -331,11 +391,18 @@
             const now = new Date();
             document.getElementById('last-update').textContent = now.toLocaleTimeString();
             document.getElementById('loader').style.display = 'none';
+
+            // Si el usuario tenía la tabla ordenada, la volvemos a ordenar tras refrescar
+            if (sortCol !== -1) {
+                sortAsc = !sortAsc; // Invertimos temporalmente para que sortTable lo vuelva a dejar como estaba
+                sortTable(sortCol);
+            }
         }
 
         // Cargar al iniciar
         document.addEventListener('DOMContentLoaded', () => {
             actualizarDatos();
+            // Refresco automático cada 60 segundos
             setInterval(actualizarDatos, 60000);
         });
     </script>
