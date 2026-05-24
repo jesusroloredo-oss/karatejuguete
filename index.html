@@ -267,6 +267,7 @@
             return parser.parseFromString(text, "text/html");
         }
 
+        // --- NUEVA VERSIÓN QUE EXTRAE TATAMI + HORA DE INICIO A LA VEZ ---
         async function obtenerTatamis() {
             try {
                 const doc = await fetchHTML(BASE_URL + "index.php?accion=tatamis");
@@ -285,12 +286,37 @@
                     const tabla = divHermano.querySelector("table");
                     if (!tabla) return;
                     
+                    // Buscamos dinámicamente qué columna es "Categoría" y cuál es "Inicio"
+                    let idxCategoria = 1; // Por defecto
+                    let idxInicio = -1; 
+                    const headers = tabla.querySelectorAll("th");
+                    headers.forEach((th, index) => {
+                        const txt = th.textContent.trim().toUpperCase();
+                        if (txt.includes("CATEGORÍA") || txt.includes("CATEGORIA")) idxCategoria = index;
+                        if (txt.includes("INICIO") || txt.includes("HORA")) idxInicio = index;
+                    });
+
                     const filas = tabla.querySelectorAll("tr");
                     filas.forEach(fila => {
                         const celdas = fila.querySelectorAll("td");
-                        if (celdas.length >= 2) {
-                            const nombreCat = celdas[1].textContent.replace(/\s+/g, ' ').trim().toUpperCase();
-                            dic[nombreCat] = tatamiNombre;
+                        const limiteColumnas = Math.max(idxCategoria, idxInicio >= 0 ? idxInicio : 0);
+                        
+                        if (celdas.length > limiteColumnas) {
+                            const nombreCat = celdas[idxCategoria].textContent.replace(/\s+/g, ' ').trim().toUpperCase();
+                            
+                            let horaInicio = "-";
+                            if (idxInicio >= 0) {
+                                // Buscamos HH:MM en la celda correspondiente
+                                const matchHora = celdas[idxInicio].textContent.trim().match(/(\d{2}:\d{2})/);
+                                if (matchHora) {
+                                    horaInicio = matchHora[1];
+                                }
+                            }
+                            
+                            dic[nombreCat] = {
+                                tatami: tatamiNombre,
+                                hora: horaInicio
+                            };
                         }
                     });
                 });
@@ -314,7 +340,6 @@
                     const textoFilaCompleta = row.textContent.toUpperCase();
                     
                     if (textoFilaCompleta.includes("FINALIZADA")) continue;
-
                     const isPreparada = textoFilaCompleta.includes("PREPARADA");
 
                     let idComp = null;
@@ -335,32 +360,7 @@
                     if (idComp) {
                         const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
                         
-                        // --- EXTRACTOR DE HORA CORREGIDO (MÉTODO ALIGN="CENTER") ---
-                        let horaInicio = "-";
-                        for (let td of tds) {
-                            // Comprobamos si la celda tiene la propiedad align="center"
-                            if (td.getAttribute("align") === "center" || td.style.textAlign === "center" || td.classList.contains("text-center")) {
-                                // Buscamos un formato de hora (Ej: 12:10) limpiando los espacios y saltos de línea
-                                const matchHora = td.textContent.trim().match(/(\d{2}:\d{2})/);
-                                if (matchHora) {
-                                    horaInicio = matchHora[1];
-                                    break;
-                                }
-                            }
-                        }
-
-                        // Respaldo por si fallara lo de align="center", cogemos cualquier texto que sea solo HH:MM
-                        if (horaInicio === "-") {
-                            for (let td of tds) {
-                                const matchHora = td.textContent.trim().match(/^(\d{2}:\d{2})$/);
-                                if (matchHora) {
-                                    horaInicio = matchHora[1];
-                                    break;
-                                }
-                            }
-                        }
-                        // ---------------------------------------------------------
-
+                        // NOTA: Ya no sacamos la hora de aquí, la sacaremos de tatamiDict.
                         try {
                             await sleep(300); 
                             const docComp = await fetchHTML(urlBase);
@@ -379,15 +379,14 @@
                                 for (let idx = 1; idx <= numPools; idx++) {
                                     enlaces.push({
                                         url: `${urlBase}&verPool=${idx}&poolMostrada=1`,
-                                        hora: horaInicio,
                                         isPreparada: isPreparada
                                     });
                                 }
                             } else {
-                                enlaces.push({ url: urlBase, hora: horaInicio, isPreparada: isPreparada });
+                                enlaces.push({ url: urlBase, isPreparada: isPreparada });
                             }
                         } catch (e) {
-                            enlaces.push({ url: urlBase, hora: horaInicio, isPreparada: isPreparada });
+                            enlaces.push({ url: urlBase, isPreparada: isPreparada });
                         }
                     }
                 }
@@ -464,8 +463,10 @@
             }
         }
 
-        function buscarTatamiParaCategoria(tituloCompleto) {
-            if (tituloCompleto === "Error de carga") return "Desconocido";
+        // --- DEVUELVE EL TATAMI Y LA HORA BASADO EN EL DICCIONARIO NUEVO ---
+        function buscarDatosTatami(tituloCompleto) {
+            const defaultData = { tatami: "Desconocido", hora: "-" };
+            if (tituloCompleto === "Error de carga") return defaultData;
 
             const tituloMayus = tituloCompleto.toUpperCase();
             if (tatamiDict[tituloMayus]) return tatamiDict[tituloMayus];
@@ -511,7 +512,7 @@
                 return tatamiDict[posiblesClaves[0]];
             }
 
-            return "Desconocido";
+            return defaultData;
         }
 
         function toggleVisto(url, btnElement) {
@@ -652,13 +653,15 @@
 
                 for (let item of enlacesItems) {
                     const url = item.url;
-                    const horaInicio = item.hora;
                     const isPreparada = item.isPreparada;
                     
                     const { titulo, estado, pendientes } = await verificarPuntuacionesYTitulo(url);
                     if (titulo === "Error de carga") hubErrores = true;
                     
-                    const tatami = buscarTatamiParaCategoria(titulo);
+                    // AHORA RECUPERAMOS EL TATAMI Y LA HORA DESDE EL MISMO DICCIONARIO
+                    const datosCat = buscarDatosTatami(titulo);
+                    const tatami = datosCat.tatami;
+                    const horaInicio = datosCat.hora;
                     
                     if (!statsPorTatami[tatami]) {
                         statsPorTatami[tatami] = { pendientes: 0, activas: 0 };
