@@ -166,6 +166,41 @@
             transition: width 0.8s ease-in-out;
             border-radius: 6px;
         }
+
+        /* --- ESTILOS DEL PANEL DE CONFIGURACIÓN --- */
+        .config-panel {
+            background: var(--row-bg);
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 40px;
+            border: 1px solid #444;
+        }
+        .config-panel h3 {
+            margin-top: 0;
+            color: #fff;
+            font-size: 1.1em;
+            border-bottom: 1px solid #555;
+            padding-bottom: 8px;
+            margin-bottom: 15px;
+        }
+        .config-input-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .config-input {
+            flex: 1;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background: #111;
+            color: #fff;
+            font-size: 14px;
+        }
+        .config-input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
     </style>
 </head>
 <body>
@@ -201,8 +236,18 @@
             </div>
     </div>
 
+    <div class="config-panel">
+        <h3>Configuración del Campeonato</h3>
+        <p style="font-size: 13px; color: #bbb; margin: 0 0 10px 0;">Introduce el enlace principal del evento de Karate Scoring que deseas monitorizar:</p>
+        <div class="config-input-group">
+            <input type="text" id="tournament-url" class="config-input" placeholder="https://cloud.karatescoring.com/tournaments/EJEMPLO_EVENTO/">
+            <button class="btn-refresh" onclick="cambiarCampeonato()">Guardar y Cargar</button>
+        </div>
+    </div>
+
     <script>
-        const BASE_URL = "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
+        // Leemos la URL guardada en el navegador, si no hay ninguna, usa la tuya por defecto
+        let BASE_URL = localStorage.getItem('karate_base_url') || "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
         const PROXY_URL = "https://corsproxy.io/?"; 
         
         let tatamiDict = {};
@@ -267,7 +312,6 @@
                     const tds = row.querySelectorAll("td");
                     if (tds.length < 3) continue;
 
-                    // NUEVO FILTRO FLEXIBLE: Convertimos toda la fila a mayúsculas y comprobamos si incluye las palabras
                     const textoFilaCompleta = row.textContent.toUpperCase();
                     
                     // Si menciona Finalizada en cualquier lugar de la fila, la ignoramos por completo
@@ -292,7 +336,7 @@
                     }
 
                     if (idComp) {
-                        const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
+                        const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion={idComp}`.replace('{idComp}', idComp);
                         
                         let horaInicio = "-";
                         for (let td of tds) {
@@ -550,6 +594,34 @@
             });
         }
 
+        // --- NUEVA FUNCIÓN PARA MODIFICAR EL CAMPEONATO ---
+        function cambiarCampeonato() {
+            let nuevaUrl = document.getElementById('tournament-url').value.trim();
+            if (!nuevaUrl) {
+                alert("Por favor, introduce una URL válida.");
+                return;
+            }
+            
+            // Forzar que el enlace termine con la barra /
+            if (!nuevaUrl.endsWith('/')) {
+                nuevaUrl += '/';
+            }
+            
+            // Guardamos en el almacenamiento local del navegador
+            localStorage.setItem('karate_base_url', nuevaUrl);
+            BASE_URL = nuevaUrl;
+            
+            // Reiniciamos la memoria de los tatamis anteriores
+            tatamiDict = {}; 
+            
+            // Ocultamos la vista de barras momentáneamente mientras carga el nuevo evento
+            document.getElementById("dashboard").style.display = "none";
+            document.querySelector("#data-table tbody").innerHTML = "";
+            
+            // Disparamos la carga de datos del nuevo campeonato
+            actualizarDatos();
+        }
+
         async function actualizarDatos() {
             if (isFetching) return;
             isFetching = true;
@@ -563,7 +635,7 @@
             try {
                 const nuevosTatamis = await obtenerTatamis();
                 if (Object.keys(nuevosTatamis).length === 0) {
-                    throw new Error("Proxy bloqueó la petición de Tatamis.");
+                    throw new Error("Proxy bloqueó la petición de Tatamis o campeonato inválido.");
                 } else {
                     tatamiDict = nuevosTatamis;
                 }
@@ -581,7 +653,6 @@
                     
                     const tatami = buscarTatamiParaCategoria(titulo);
                     
-                    // Sumamos siempre a las barras de abajo
                     if (!statsPorTatami[tatami]) {
                         statsPorTatami[tatami] = { pendientes: 0, activas: 0 };
                     }
@@ -590,8 +661,7 @@
                         statsPorTatami[tatami].activas += 1;
                     }
 
-                    // DOBLE FILTRO DE LIMPIEZA PARA LA TABLA SUPERIOR:
-                    // Si está Preparada, O si ya tiene 0 pendientes (no queda nada por hacer), la ocultamos.
+                    // Ocultar de la tabla superior si está Preparada o si ya tiene 0 pendientes
                     if (isPreparada || (pendientes === 0 && titulo !== "Error de carga")) {
                         continue;
                     }
@@ -649,7 +719,7 @@
 
             } catch (error) {
                 console.error("Error crítico:", error);
-                document.getElementById('error-msg').textContent = "Aviso: El proxy está saturado. Mostrando la última versión válida.";
+                document.getElementById('error-msg').textContent = "Aviso: Error cargando el evento o proxy saturado. Comprueba el enlace.";
                 document.getElementById('error-msg').style.display = 'block';
             } finally {
                 document.getElementById('loader').style.display = 'none';
@@ -658,6 +728,9 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
+            // Rellenamos el cuadro de texto del final con el enlace que esté activo actualmente
+            document.getElementById('tournament-url').value = BASE_URL;
+            
             actualizarDatos();
             setInterval(actualizarDatos, 120000); 
         });
