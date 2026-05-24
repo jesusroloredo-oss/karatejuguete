@@ -246,7 +246,6 @@
     </div>
 
     <script>
-        // CAMPEONATO POR DEFECTO ACTUALIZADO: FKIB2026_LiMa3
         let BASE_URL = localStorage.getItem('karate_base_url') || "https://cloud.karatescoring.com/tournaments/FKIB2026_LiMa3/";
         const PROXY_URL = "https://corsproxy.io/?"; 
         
@@ -336,27 +335,31 @@
                     if (idComp) {
                         const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
                         
-                        // --- EXTRACTOR DE HORA CORREGIDO ---
-                        // Buscamos específicamente la celda (td) que contiene la imagen botones/tatamis.png
+                        // --- EXTRACTOR DE HORA CORREGIDO (MÉTODO ALIGN="CENTER") ---
                         let horaInicio = "-";
-                        const tdConImgTatami = Array.from(tds).find(td => td.querySelector('img[src*="tatamis.png"]'));
-                        
-                        if (tdConImgTatami) {
-                            const matchHora = tdConImgTatami.textContent.trim().match(/(\d{2}:\d{2})/);
-                            if (matchHora) {
-                                horaInicio = matchHora[1];
-                            }
-                        } else {
-                            // Respaldo de seguridad por si en alguna fila no viniese la imagen
-                            for (let td of tds) {
-                                const dateMatch = td.textContent.trim().match(/(\d{2}:\d{2})/);
-                                if (dateMatch) {
-                                    horaInicio = dateMatch[1];
+                        for (let td of tds) {
+                            // Comprobamos si la celda tiene la propiedad align="center"
+                            if (td.getAttribute("align") === "center" || td.style.textAlign === "center" || td.classList.contains("text-center")) {
+                                // Buscamos un formato de hora (Ej: 12:10) limpiando los espacios y saltos de línea
+                                const matchHora = td.textContent.trim().match(/(\d{2}:\d{2})/);
+                                if (matchHora) {
+                                    horaInicio = matchHora[1];
                                     break;
                                 }
                             }
                         }
-                        // ------------------------------------
+
+                        // Respaldo por si fallara lo de align="center", cogemos cualquier texto que sea solo HH:MM
+                        if (horaInicio === "-") {
+                            for (let td of tds) {
+                                const matchHora = td.textContent.trim().match(/^(\d{2}:\d{2})$/);
+                                if (matchHora) {
+                                    horaInicio = matchHora[1];
+                                    break;
+                                }
+                            }
+                        }
+                        // ---------------------------------------------------------
 
                         try {
                             await sleep(300); 
