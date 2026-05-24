@@ -246,8 +246,8 @@
     </div>
 
     <script>
-        // Leemos la URL guardada en el navegador, si no hay ninguna, usa la tuya por defecto
-        let BASE_URL = localStorage.getItem('karate_base_url') || "https://cloud.karatescoring.com/tournaments/FGK2026_LigaJ3/";
+        // CAMPEONATO POR DEFECTO ACTUALIZADO: FKIB2026_LiMa3
+        let BASE_URL = localStorage.getItem('karate_base_url') || "https://cloud.karatescoring.com/tournaments/FKIB2026_LiMa3/";
         const PROXY_URL = "https://corsproxy.io/?"; 
         
         let tatamiDict = {};
@@ -314,10 +314,8 @@
 
                     const textoFilaCompleta = row.textContent.toUpperCase();
                     
-                    // Si menciona Finalizada en cualquier lugar de la fila, la ignoramos por completo
                     if (textoFilaCompleta.includes("FINALIZADA")) continue;
 
-                    // Comprobamos si está Preparada
                     const isPreparada = textoFilaCompleta.includes("PREPARADA");
 
                     let idComp = null;
@@ -336,16 +334,29 @@
                     }
 
                     if (idComp) {
-                        const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion={idComp}`.replace('{idComp}', idComp);
+                        const urlBase = `${BASE_URL}index.php?accion=verHojaCompeticion&idCompeticion=${idComp}`;
                         
+                        // --- EXTRACTOR DE HORA CORREGIDO ---
+                        // Buscamos específicamente la celda (td) que contiene la imagen botones/tatamis.png
                         let horaInicio = "-";
-                        for (let td of tds) {
-                            const dateMatch = td.textContent.trim().match(/\d{4}-\d{2}-\d{2}\s+(\d{2}:\d{2})/);
-                            if (dateMatch) {
-                                horaInicio = dateMatch[1];
-                                break;
+                        const tdConImgTatami = Array.from(tds).find(td => td.querySelector('img[src*="tatamis.png"]'));
+                        
+                        if (tdConImgTatami) {
+                            const matchHora = tdConImgTatami.textContent.trim().match(/(\d{2}:\d{2})/);
+                            if (matchHora) {
+                                horaInicio = matchHora[1];
+                            }
+                        } else {
+                            // Respaldo de seguridad por si en alguna fila no viniese la imagen
+                            for (let td of tds) {
+                                const dateMatch = td.textContent.trim().match(/(\d{2}:\d{2})/);
+                                if (dateMatch) {
+                                    horaInicio = dateMatch[1];
+                                    break;
+                                }
                             }
                         }
+                        // ------------------------------------
 
                         try {
                             await sleep(300); 
@@ -594,7 +605,6 @@
             });
         }
 
-        // --- NUEVA FUNCIÓN PARA MODIFICAR EL CAMPEONATO ---
         function cambiarCampeonato() {
             let nuevaUrl = document.getElementById('tournament-url').value.trim();
             if (!nuevaUrl) {
@@ -602,23 +612,17 @@
                 return;
             }
             
-            // Forzar que el enlace termine con la barra /
             if (!nuevaUrl.endsWith('/')) {
                 nuevaUrl += '/';
             }
             
-            // Guardamos en el almacenamiento local del navegador
             localStorage.setItem('karate_base_url', nuevaUrl);
             BASE_URL = nuevaUrl;
-            
-            // Reiniciamos la memoria de los tatamis anteriores
             tatamiDict = {}; 
             
-            // Ocultamos la vista de barras momentáneamente mientras carga el nuevo evento
             document.getElementById("dashboard").style.display = "none";
             document.querySelector("#data-table tbody").innerHTML = "";
             
-            // Disparamos la carga de datos del nuevo campeonato
             actualizarDatos();
         }
 
@@ -661,7 +665,6 @@
                         statsPorTatami[tatami].activas += 1;
                     }
 
-                    // Ocultar de la tabla superior si está Preparada o si ya tiene 0 pendientes
                     if (isPreparada || (pendientes === 0 && titulo !== "Error de carga")) {
                         continue;
                     }
@@ -728,9 +731,7 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            // Rellenamos el cuadro de texto del final con el enlace que esté activo actualmente
             document.getElementById('tournament-url').value = BASE_URL;
-            
             actualizarDatos();
             setInterval(actualizarDatos, 120000); 
         });
